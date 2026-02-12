@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "waggle-async-agents": {
+      "command": "poetry",
+      "args": [
+        "run",
+        "waggle"
+      ],
+      "cwd": "/absolute/path/to/waggle"
+    }
+  }
+}
