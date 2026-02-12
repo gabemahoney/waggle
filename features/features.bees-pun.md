@@ -3,15 +3,15 @@ id: features.bees-pun
 type: t3
 title: Run all tests and verify name/repo filtering, cleanup integration, and custom
   state tests still pass
-parent: features.bees-8t5
 up_dependencies:
 - features.bees-v6r
 - features.bees-flh
 - features.bees-d4d
 - features.bees-vc5
-status: open
+parent: features.bees-8t5
 created_at: '2026-02-12T15:16:05.657040'
-updated_at: '2026-02-12T15:16:05.657053'
+updated_at: '2026-02-12T15:22:46.549110'
+status: completed
 bees_version: '1.1'
 ---
 

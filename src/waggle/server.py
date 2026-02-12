@@ -170,53 +170,7 @@ async def list_agents(
     # Clean up dead sessions before querying
     cleanup_dead_sessions()
 
-    # Query tmux sessions
-    try:
-        result = subprocess.run(
-            ["tmux", "list-sessions", "-F", TMUX_FMT_WITH_PATH],
-            capture_output=True,
-            text=True,
-            check=True,
-            timeout=5
-        )
-    except subprocess.TimeoutExpired:
-        return {
-            "status": "error",
-            "error": "tmux command timed out after 5 seconds"
-        }
-    except subprocess.CalledProcessError as e:
-        # tmux returns non-zero if no sessions exist
-        if "no server running" in e.stderr.lower() or "no sessions" in e.stderr.lower():
-            return {"status": "success", "agents": []}
-        return {
-            "status": "error",
-            "error": f"Failed to query tmux sessions: {e.stderr.strip()}"
-        }
-    except FileNotFoundError:
-        return {
-            "status": "error",
-            "error": "tmux command not found - is tmux installed?"
-        }
-    
-    # Parse tmux output into session objects
-    sessions = []
-    for line in result.stdout.strip().split('\n'):
-        if not line:
-            continue
-        parts = line.split(TMUX_FIELD_SEP, 3)  # Split into max 4 parts
-        if len(parts) >= 4:
-            session_name, session_id, session_created, session_path = parts[0], parts[1], parts[2], parts[3]
-            # Apply name filter if provided
-            if name is None or session_name == name:
-                sessions.append({
-                    "name": session_name,
-                    "session_id": session_id,
-                    "session_created": session_created,
-                    "directory": session_path,
-                    "status": "unknown"  # Default status
-                })
-    
-    # Query database for agent state
+    # Query database for registered agents (DB as source of truth)
     db_path = get_db_path()
     try:
         with connection(db_path) as conn:
@@ -225,42 +179,81 @@ async def list_agents(
             cursor.execute("SELECT key, repo, status FROM state")
             state_entries = cursor.fetchall()
             
-            # Build a lookup map: composite_key -> (repo, status)
-            # Composite key: name+session_id+session_created
-            state_map = {}
+            # Build agents list from DB entries
+            agents = []
             for key, repo_path, status in state_entries:
-                # Key format: name+session_id+session_created (no namespace prefix)
-                # Status: Custom state string (any value set by agents, e.g. "working", "waiting_for_input", etc.)
-                state_map[key] = (repo_path, status)
-
-            # Update session statuses and repos based on database state
-            for session in sessions:
-                # Build composite key for this session
-                composite_key = f"{session['name']}+{session['session_id']}+{session['session_created']}"
-                if composite_key in state_map:
-                    repo_path, status = state_map[composite_key]
-                    session["status"] = status
-                    session["repo"] = repo_path
-                else:
-                    session["repo"] = None
-                    
+                # Key format: name+session_id+session_created
+                parts = key.split('+', 2)
+                if len(parts) != 3:
+                    continue  # Skip malformed keys
+                
+                session_name, session_id, session_created = parts[0], parts[1], parts[2]
+                
+                # Apply name filter if provided
+                if name is not None and session_name != name:
+                    continue
+                
+                # Apply repo filter if provided
+                if repo is not None:
+                    repo_lower = repo.lower()
+                    if repo_path is None or repo_lower not in repo_path.lower():
+                        continue
+                
+                agents.append({
+                    "name": session_name,
+                    "session_id": session_id,
+                    "session_created": session_created,
+                    "status": status,
+                    "repo": repo_path,
+                    "directory": None  # Will enrich with tmux data
+                })
     except Exception as e:
         return {
             "status": "error",
             "error": f"Failed to query database: {str(e)}"
         }
     
-    # Filter by repository if repo parameter provided
-    if repo is not None:
-        repo_lower = repo.lower()
-        sessions = [
-            session for session in sessions
-            if session.get("repo") is not None and repo_lower in session["repo"].lower()
-        ]
+    # Enrich with tmux session info (session_path) if session is still alive
+    try:
+        result = subprocess.run(
+            ["tmux", "list-sessions", "-F", TMUX_FMT_WITH_PATH],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=5
+        )
+        
+        # Parse tmux output into lookup map
+        tmux_sessions = {}
+        for line in result.stdout.strip().split('\n'):
+            if not line:
+                continue
+            parts = line.split(TMUX_FIELD_SEP, 3)
+            if len(parts) >= 4:
+                t_name, t_id, t_created, t_path = parts[0], parts[1], parts[2], parts[3]
+                # Build composite key matching DB format
+                composite_key = f"{t_name}+{t_id}+{t_created}"
+                tmux_sessions[composite_key] = t_path
+        
+        # Enrich agents with tmux session_path
+        for agent in agents:
+            composite_key = f"{agent['name']}+{agent['session_id']}+{agent['session_created']}"
+            if composite_key in tmux_sessions:
+                agent["directory"] = tmux_sessions[composite_key]
+                
+    except subprocess.TimeoutExpired:
+        # Non-fatal: agents exist in DB but we couldn't enrich with tmux data
+        pass
+    except subprocess.CalledProcessError:
+        # Non-fatal: tmux might have no sessions, DB agents still valid
+        pass
+    except FileNotFoundError:
+        # Non-fatal: tmux not installed, but DB agents still exist
+        pass
     
     return {
         "status": "success",
-        "agents": sessions
+        "agents": agents
     }
 
 

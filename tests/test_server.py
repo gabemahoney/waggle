@@ -351,12 +351,16 @@ class TestListAgents:
     """Tests for list_agents MCP tool."""
     
     @pytest.mark.asyncio
-    async def test_list_agents_returns_empty_when_no_sessions(self, mock_ctx, mock_cleanup, mock_tmux_subprocess):
-        """Verify list_agents returns empty list when no tmux sessions exist."""
+    async def test_list_agents_returns_empty_when_no_sessions(self, mock_ctx, mock_cleanup, mock_tmux_subprocess, mock_db_path, mock_db_connection):
+        """Verify list_agents returns empty list when no DB entries exist."""
+        mock_conn, mock_cursor = mock_db_connection
+        
         # Simulate "no server running" error
         mock_tmux_subprocess.side_effect = subprocess.CalledProcessError(
             1, ["tmux"], stderr="no server running"
         )
+        
+        mock_cursor.fetchall.return_value = []  # No DB entries
         
         result = await list_agents(ctx=mock_ctx)
         
@@ -364,8 +368,8 @@ class TestListAgents:
         assert result["agents"] == []
     
     @pytest.mark.asyncio
-    async def test_list_agents_returns_sessions_with_unknown_status(self, mock_ctx, mock_cleanup, mock_tmux_subprocess, mock_db_path, mock_db_connection):
-        """Verify list_agents returns sessions with unknown status when no db entries."""
+    async def test_list_agents_excludes_sessions_without_db_entries(self, mock_ctx, mock_cleanup, mock_tmux_subprocess, mock_db_path, mock_db_connection):
+        """Verify list_agents excludes sessions without DB entries (DB as source of truth)."""
         mock_conn, mock_cursor = mock_db_connection
         
         # Mock tmux list-sessions output
@@ -380,9 +384,7 @@ class TestListAgents:
         result = await list_agents(ctx=mock_ctx)
         
         assert result["status"] == "success"
-        assert len(result["agents"]) == 2
-        assert result["agents"][0]["name"] == "session1"
-        assert result["agents"][0]["status"] == "unknown"
+        assert len(result["agents"]) == 0  # No agents returned because none are registered in DB
     
     @pytest.mark.asyncio
     async def test_list_agents_matches_status_from_database(self, tmp_path, mock_ctx, mock_cleanup, mock_tmux_subprocess, mock_db_path, mock_db_connection):
@@ -418,7 +420,12 @@ class TestListAgents:
             stderr=""
         )
         
-        mock_cursor.fetchall.return_value = []
+        # Provide DB entries for all 3 agents
+        mock_cursor.fetchall.return_value = [
+            ("agent1+$0+1234567890", "/path1", "working"),
+            ("agent2+$1+1234567891", "/path2", "waiting"),
+            ("agent3+$2+1234567892", "/path3", "idle")
+        ]
         
         result = await list_agents(name="agent2", ctx=mock_ctx)
         
@@ -444,27 +451,43 @@ class TestListAgents:
         assert "Failed to query database" in result["error"]
     
     @pytest.mark.asyncio
-    async def test_list_agents_handles_tmux_not_installed(self, mock_ctx, mock_cleanup, mock_tmux_subprocess):
-        """Verify list_agents returns error when tmux is not installed."""
+    async def test_list_agents_handles_tmux_not_installed(self, mock_ctx, mock_cleanup, mock_tmux_subprocess, mock_db_path, mock_db_connection):
+        """Verify list_agents returns DB agents even when tmux is not installed."""
+        mock_conn, mock_cursor = mock_db_connection
         mock_tmux_subprocess.side_effect = FileNotFoundError()
+        
+        # DB has one registered agent
+        mock_cursor.fetchall.return_value = [
+            ("agent1+$0+1234567890", "/path1", "working")
+        ]
         
         result = await list_agents(ctx=mock_ctx)
         
-        assert result["status"] == "error"
-        assert "tmux command not found" in result["error"]
+        assert result["status"] == "success"
+        assert len(result["agents"]) == 1
+        assert result["agents"][0]["name"] == "agent1"
+        assert result["agents"][0]["directory"] is None  # Couldn't enrich with tmux data
     
     @pytest.mark.asyncio
-    async def test_list_agents_handles_tmux_timeout(self, mock_ctx, mock_cleanup, mock_tmux_subprocess):
-        """Verify list_agents returns error when tmux command times out."""
+    async def test_list_agents_handles_tmux_timeout(self, mock_ctx, mock_cleanup, mock_tmux_subprocess, mock_db_path, mock_db_connection):
+        """Verify list_agents returns DB agents even when tmux command times out."""
+        mock_conn, mock_cursor = mock_db_connection
         mock_tmux_subprocess.side_effect = subprocess.TimeoutExpired(
             cmd=["tmux", "list-sessions"],
             timeout=5
         )
         
+        # DB has one registered agent
+        mock_cursor.fetchall.return_value = [
+            ("agent1+$0+1234567890", "/path1", "working")
+        ]
+        
         result = await list_agents(ctx=mock_ctx)
         
-        assert result["status"] == "error"
-        assert "timed out" in result["error"]
+        assert result["status"] == "success"
+        assert len(result["agents"]) == 1
+        assert result["agents"][0]["name"] == "agent1"
+        assert result["agents"][0]["directory"] is None  # Couldn't enrich with tmux data
     
     @pytest.mark.asyncio
     async def test_list_agents_includes_namespace_field(self, mock_ctx, mock_cleanup, mock_tmux_subprocess, mock_db_path, mock_db_connection):
@@ -491,7 +514,7 @@ class TestListAgents:
     
     @pytest.mark.asyncio
     async def test_list_agents_namespace_none_when_no_state(self, mock_ctx, mock_cleanup, mock_tmux_subprocess, mock_db_path, mock_db_connection):
-        """Verify list_agents sets namespace to None when no database entry."""
+        """Verify list_agents returns empty when no database entries (DB as source of truth)."""
         mock_conn, mock_cursor = mock_db_connection
         
         mock_tmux_subprocess.return_value = MagicMock(
@@ -505,8 +528,7 @@ class TestListAgents:
         result = await list_agents(ctx=mock_ctx)
         
         assert result["status"] == "success"
-        assert len(result["agents"]) == 1
-        assert result["agents"][0]["repo"] is None
+        assert len(result["agents"]) == 0  # No agents because none registered in DB
     
     @pytest.mark.asyncio
     async def test_list_agents_filters_by_repo(self, mock_ctx, mock_cleanup, mock_tmux_subprocess, mock_db_path, mock_db_connection):
@@ -580,7 +602,7 @@ class TestListAgents:
     
     @pytest.mark.asyncio
     async def test_list_agents_without_repo_filter_returns_all(self, mock_ctx, mock_cleanup, mock_tmux_subprocess, mock_db_path, mock_db_connection):
-        """Verify list_agents without repo parameter returns all agents."""
+        """Verify list_agents without repo parameter returns all DB-registered agents."""
         mock_conn, mock_cursor = mock_db_connection
         
         mock_tmux_subprocess.return_value = MagicMock(
@@ -597,10 +619,34 @@ class TestListAgents:
         result = await list_agents(ctx=mock_ctx)
         
         assert result["status"] == "success"
-        assert len(result["agents"]) == 3
+        assert len(result["agents"]) == 2  # Only DB-registered agents returned
         assert result["agents"][0]["name"] == "agent1"
         assert result["agents"][1]["name"] == "agent2"
-        assert result["agents"][2]["name"] == "agent3"
+    
+    @pytest.mark.asyncio
+    async def test_list_agents_excludes_unregistered_tmux_sessions(self, mock_ctx, mock_cleanup, mock_tmux_subprocess, mock_db_path, mock_db_connection):
+        """Verify sessions without DB entries are excluded from list_agents output."""
+        mock_conn, mock_cursor = mock_db_connection
+        
+        # Mock tmux with 3 sessions
+        mock_tmux_subprocess.return_value = MagicMock(
+            returncode=0,
+            stdout=f"registered-agent{SEP}$0{SEP}1234567890{SEP}/projects/waggle\nunregistered-session{SEP}$1{SEP}1234567891{SEP}/random/path\nanother-unregistered{SEP}$2{SEP}1234567892{SEP}/other/path\n",
+            stderr=""
+        )
+        
+        # Only one session registered in DB
+        mock_cursor.fetchall.return_value = [
+            ("registered-agent+$0+1234567890", "/projects/waggle", "working")
+        ]
+        
+        result = await list_agents(ctx=mock_ctx)
+        
+        assert result["status"] == "success"
+        assert len(result["agents"]) == 1  # Only registered agent returned
+        assert result["agents"][0]["name"] == "registered-agent"
+        assert result["agents"][0]["status"] == "working"
+        # Unregistered sessions are completely excluded
 
 
 class TestDeleteRepoAgents:
@@ -925,7 +971,7 @@ class TestListAgentsCustomStates:
     
     @pytest.mark.asyncio
     async def test_list_agents_custom_states_with_unknown_status(self, tmp_path, mock_ctx, mock_cleanup, mock_tmux_subprocess, mock_db_path, mock_db_connection):
-        """Verify list_agents shows custom states for agents with db entries and unknown for those without."""
+        """Verify list_agents shows only DB-registered agents with custom states."""
         mock_conn, mock_cursor = mock_db_connection
         
         # Return 4 agents from tmux
@@ -944,17 +990,13 @@ class TestListAgentsCustomStates:
         result = await list_agents(ctx=mock_ctx)
         
         assert result["status"] == "success"
-        assert len(result["agents"]) == 4
+        assert len(result["agents"]) == 2  # Only DB-registered agents returned
         # Agents with custom states
         assert result["agents"][0]["name"] == "with-state1"
         assert result["agents"][0]["status"] == "session started"
-        assert result["agents"][2]["name"] == "with-state2"
-        assert result["agents"][2]["status"] == "processing data"
-        # Agents without db entries show unknown
-        assert result["agents"][1]["name"] == "no-state"
-        assert result["agents"][1]["status"] == "unknown"
-        assert result["agents"][3]["name"] == "no-state2"
-        assert result["agents"][3]["status"] == "unknown"
+        assert result["agents"][1]["name"] == "with-state2"
+        assert result["agents"][1]["status"] == "processing data"
+        # Agents without db entries are excluded entirely
 
 
 class TestListAgentsCleanupIntegration:

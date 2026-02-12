@@ -2,12 +2,12 @@
 id: features.bees-c88
 type: t3
 title: Run unit tests and fix failures
-parent: features.bees-5bs
 up_dependencies:
 - features.bees-mur
-status: open
+parent: features.bees-5bs
 created_at: '2026-02-12T15:15:58.109933'
-updated_at: '2026-02-12T15:15:58.109944'
+updated_at: '2026-02-12T15:22:47.274873'
+status: completed
 bees_version: '1.1'
 ---
 
