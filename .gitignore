@@ -1,3 +1,13 @@
+# ==============================================================================
+# TWO-BRANCH WORKFLOW
+# ==============================================================================
+# This repo uses two branches:
+#   - 'dev' (local only)  - includes .bees/ and features/ for development
+#   - 'main' (remote)     - excludes .bees/ and features/ for public repo
+#
+# To update remote: git checkout main && git merge dev (manually exclude folders)
+# ==============================================================================
+
 # IDE
 .idea/
 .vscode/
