@@ -12,7 +12,6 @@ Uses hook-driven state updates to track whether agents are working or waiting fo
 **Dependencies:**
 - tmux
 - sqlite3
-- jq
 - python3
 
 **Install Waggle:**
@@ -195,7 +194,7 @@ All settings are optional with these defaults:
 **Verify dependencies:**
 
 ```bash
-which tmux sqlite3 jq python3
+which tmux sqlite3 python3
 ```
 
 All commands must be found. Install missing dependencies via package manager.

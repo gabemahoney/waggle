@@ -20,8 +20,8 @@ STATE="$1"
 # Read database path from config with fallback
 CONFIG_FILE="$HOME/.waggle/config.json"
 DB_PATH="~/.waggle/agent_state.db"
-if [[ -f "$CONFIG_FILE" ]] && command -v jq &>/dev/null; then
-    CUSTOM_PATH=$(jq -r '.database_path // empty' "$CONFIG_FILE" 2>/dev/null || echo "")
+if [[ -f "$CONFIG_FILE" ]]; then
+    CUSTOM_PATH=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('database_path',''))" "$CONFIG_FILE" 2>/dev/null || echo "")
     if [[ -n "$CUSTOM_PATH" ]]; then
         DB_PATH="$CUSTOM_PATH"
     fi
