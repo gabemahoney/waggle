@@ -142,20 +142,20 @@ async def list_agents(
     """List all active async agents with their status.
     
     Queries tmux sessions to find Claude and OpenCode instances. Reports back their state (waiting, working, etc).
-    Returns all agents system-wide with optional filtering by repository path.## Output Formatting
+    Returns all agents system-wide with optional filtering by repository path.
 
-    When responding to user, use this structured format example (but replace with returned values
+    ## Output Formatting
 
-    ┌───────────────────┬─────────┬────────────────────┬────┐
-    │ Name              │ Status  │ Directory          │ ID │
-    ├───────────────────┼─────────┼────────────────────┼────┤
-    │ agent-abc123      │ `working` │ /path/to/project1  │ $1 │
-    ├───────────────────┼─────────┼────────────────────┼────┤
-    │ agent-def456      │ `waiting` │ /path/to/project2  │ $2 │
-    └───────────────────┴─────────┴────────────────────┴────┘
+    When responding to user, use this markdown table format (backticks render status in blue):
 
-    *size columns to fit actual content"
-    If the directory value seem too long (~30 chars or so ) then truncate from the front, not the back e.g .../projects/project1 not /Users/user/projects/...
+    | Name | Status | Directory | ID |
+    |------|--------|-----------|-----|
+    | agent-abc123 | `working` | /path/to/project1 | $1 |
+    | agent-def456 | `waiting` | /path/to/project2 | $2 |
+
+    Notes:
+    - Use backticks around status values to render them as inline code (blue)
+    - If directory is too long (~30 chars), truncate from front: .../projects/project1 not /Users/user/projects/...
 
     Args:
         name: Optional filter to return only sessions matching this name
