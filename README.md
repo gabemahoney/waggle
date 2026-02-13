@@ -56,8 +56,7 @@ Add to `~/.claude.json`:
 
 **2. Configure Claude Hooks**
 
-This will allow your Claude Code sessions to register their state in the database. 
-Without this, Claude sessions will appear but their state will be `unknown`.
+This will allow your Claude Code sessions to register their state in the database.
 **Note**: You can change the `waiting` and `working` params to any state string you like.
 
 Add to `~/.claude/settings.json`:
@@ -115,9 +114,7 @@ Add to `~/.opencode/opencode.json`:
 
 **2. Install State Tracker Plugin**
 
-This will allow your OpenCode sessions to register their state in the database. 
-Without this, OpenCode sessions will appear but their state will be `unknown`.
-
+This will allow your OpenCode sessions to register their state in the database.
 OpenCode uses a plugin-based approach for state tracking. Install the plugin to `~/.opencode/plugins`:
 
 ```bash
