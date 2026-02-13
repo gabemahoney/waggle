@@ -70,6 +70,14 @@ Add to `~/.claude/settings.json`:
     "UserPromptSubmit": [
       { "hooks": [{ "type": "command", "command": "~/.waggle/hooks/set_state.sh working" }] }
     ],
+    "PreToolUse": [
+      { "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "~/.waggle/hooks/set_state.sh waiting" }] },
+      { "matcher": "^(?!AskUserQuestion$).*", "hooks": [{ "type": "command", "command": "~/.waggle/hooks/set_state.sh working" }] }
+    ],
+    "PostToolUse": [
+      { "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "~/.waggle/hooks/set_state.sh waiting" }] },
+      { "matcher": "^(?!AskUserQuestion$).*", "hooks": [{ "type": "command", "command": "~/.waggle/hooks/set_state.sh working" }] }
+    ],
     "PermissionRequest": [
       { "matcher": "*", "hooks": [{ "type": "command", "command": "~/.waggle/hooks/set_state.sh waiting" }] }
     ],
@@ -78,6 +86,9 @@ Add to `~/.claude/settings.json`:
     ],
     "Notification": [
       { "matcher": "*", "hooks": [{ "type": "command", "command": "~/.waggle/hooks/set_state.sh waiting" }] }
+    ],
+    "SessionEnd": [
+      { "hooks": [{ "type": "command", "command": "~/.waggle/hooks/set_state.sh --delete" }] }
     ]
   }
 }
