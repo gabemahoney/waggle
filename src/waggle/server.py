@@ -149,11 +149,12 @@ async def list_agents(
     ┌───────────────────┬─────────┬────────────────────┬────┐
     │ Name              │ Status  │ Directory          │ ID │
     ├───────────────────┼─────────┼────────────────────┼────┤
-    │ agent-abc123      │ working │ /path/to/project1  │ $1 │
+    │ agent-abc123      │ `working` │ /path/to/project1  │ $1 │
     ├───────────────────┼─────────┼────────────────────┼────┤
-    │ agent-def456      │ waiting │ /path/to/project2  │ $2 │
+    │ agent-def456      │ `waiting` │ /path/to/project2  │ $2 │
     └───────────────────┴─────────┴────────────────────┴────┘
 
+    *size columns to fit actual content"
     If the directory value seem too long (~30 chars or so ) then truncate from the front, not the back e.g .../projects/project1 not /Users/user/projects/...
 
     Args:
