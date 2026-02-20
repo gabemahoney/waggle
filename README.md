@@ -176,7 +176,7 @@ The server also offers the ability to forcibly delete entries from the db if for
 
 Waggle has 4 components:
 
-1. **MCP Server** - Provides `list_agents`, `delete_repo_agents`, `close_session` tools
+1. **MCP Server** - Provides `list_agents`, `delete_repo_agents`, `close_session`, `read_pane` tools
 2. **SQLite Database** - Persistent agent state tracking with session identity keys
 3. **tmux Sessions** - Isolated environments for async agents
 4. **State Tracking Integration** - Auto-update database on agent state changes

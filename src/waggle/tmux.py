@@ -162,3 +162,68 @@ async def check_llm_running(session_id: str) -> bool:
         True if an LLM agent is running, False otherwise or on error.
     """
     return await asyncio.to_thread(_check_llm_running_sync, session_id)
+
+
+def _capture_pane_sync(session_id: str, pane_id: str | None, scrollback: int) -> dict:
+    try:
+        server = libtmux.Server()
+        session = server.sessions.get(session_id=session_id)
+        if pane_id is None:
+            pane = session.active_window.active_pane
+        else:
+            pane = server.panes.get(pane_id=pane_id)
+            if pane.session_id != session_id:
+                return {
+                    "status": "error",
+                    "message": f"Pane '{pane_id}' does not belong to session '{session_id}'",
+                }
+        lines = pane.capture_pane(start=-scrollback)
+        return {"status": "success", "content": "\n".join(lines)}
+    except LibTmuxException as e:
+        return {"status": "error", "message": str(e)}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+async def capture_pane(session_id: str, pane_id: str | None = None, scrollback: int = 50) -> dict:
+    """Capture content from a tmux pane.
+
+    Args:
+        session_id: The tmux session ID (e.g. "$1").
+        pane_id: Optional pane ID. If None, uses the active pane.
+        scrollback: Number of lines of scrollback to capture.
+
+    Returns:
+        {"status": "success", "content": str} or {"status": "error", "message": str}
+    """
+    return await asyncio.to_thread(_capture_pane_sync, session_id, pane_id, scrollback)
+
+
+def _validate_pane_id_sync(session_id: str, pane_id: str) -> dict:
+    try:
+        server = libtmux.Server()
+        session = server.sessions.get(session_id=session_id)
+        pane = server.panes.get(pane_id=pane_id)
+        if pane.session_id != session_id:
+            return {
+                "status": "error",
+                "message": f"Pane '{pane_id}' does not belong to session '{session_id}'",
+            }
+        return {"status": "success"}
+    except LibTmuxException as e:
+        return {"status": "error", "message": str(e)}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+async def validate_pane_id(session_id: str, pane_id: str) -> dict:
+    """Validate that a pane ID belongs to the given session.
+
+    Args:
+        session_id: The tmux session ID (e.g. "$1").
+        pane_id: The pane ID to validate.
+
+    Returns:
+        {"status": "success"} or {"status": "error", "message": str}
+    """
+    return await asyncio.to_thread(_validate_pane_id_sync, session_id, pane_id)

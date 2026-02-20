@@ -12,12 +12,14 @@ from mcp.shared.exceptions import McpError
 
 from waggle.config import get_db_path
 from waggle.database import init_schema, connection
+from waggle import state_parser
 from waggle.tmux import (
     get_sessions,
     get_active_session_keys,
     kill_session,
     validate_session_name_id,
     check_llm_running,
+    capture_pane,
 )
 
 # Initialize FastMCP instance
@@ -356,6 +358,63 @@ async def close_session(
 
     # Step 9: Success
     return {"status": "success", "message": "Session closed"}
+
+
+@mcp.tool()
+async def read_pane(
+    session_id: str,
+    pane_id: str | None = None,
+    scrollback: int = 50,
+) -> dict:
+    """Read content from an agent's tmux pane and detect its current state.
+
+    Captures the visible pane output and classifies the agent state
+    (working, done, ask_user, check_permission, or unknown).
+
+    Args:
+        session_id: The tmux session ID (e.g. "$1"). Required.
+        pane_id: Optional pane ID. If None, uses the session's active pane.
+        scrollback: Number of lines of scrollback to capture. Default 50.
+
+    Returns:
+        {"status": "success", "agent_state": str, "content": str, "prompt_data": dict | None} or
+        {"status": "error", "message": str}
+    """
+    db_path = get_db_path()
+
+    # Step 1: Validate session_id exists in DB
+    try:
+        with connection(db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT key FROM state WHERE key LIKE ?",
+                (f"%+{session_id}+%",),
+            )
+            rows = cursor.fetchall()
+            matching_key = rows[0][0] if rows else None
+    except Exception as e:
+        return {"status": "error", "message": f"Failed to query database: {str(e)}"}
+
+    if matching_key is None:
+        return {"status": "error", "message": f"Session '{session_id}' not found in database"}
+
+    # Step 2: Capture pane content
+    capture_result = await capture_pane(session_id, pane_id, scrollback)
+    if capture_result["status"] != "success":
+        return capture_result
+
+    content = capture_result["content"]
+
+    # Step 3: Parse state from content
+    agent_state, prompt_data = state_parser.parse(content)
+
+    # Step 4: Return result
+    return {
+        "status": "success",
+        "agent_state": agent_state,
+        "content": content,
+        "prompt_data": prompt_data,
+    }
 
 
 def cleanup_dead_sessions():

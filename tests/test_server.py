@@ -18,6 +18,7 @@ from waggle.server import (
 list_agents = server.list_agents.fn
 delete_repo_agents = server.delete_repo_agents.fn
 close_session = server.close_session.fn
+read_pane = server.read_pane.fn
 
 
 # Pytest fixtures for common mock patterns
@@ -1264,3 +1265,310 @@ class TestCloseSession:
 
         assert result["status"] == "success"
         assert db_was_empty_at_kill == [True], "DB entry must be deleted before tmux kill"
+
+
+class TestReadPane:
+    """Tests for read_pane() MCP tool — pane capture and state detection."""
+
+    def _insert_session(self, db_path: str, session_id: str, session_name: str) -> str:
+        """Insert a state row and return the key."""
+        key = f"{session_name}+{session_id}+1111111111"
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "INSERT INTO state (key, repo, status, updated_at) VALUES (?, ?, ?, ?)",
+            (key, "/repo", "working", "2024-01-01T00:00:00"),
+        )
+        conn.commit()
+        conn.close()
+        return key
+
+    @pytest.mark.asyncio
+    async def test_unregistered_session_returns_error(self, mock_db_path):
+        """Verify error when session_id has no DB entry."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+
+        result = await read_pane("$99")
+
+        assert result["status"] == "error"
+        assert "$99" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_returns_working_state(self, mock_db_path):
+        """Verify correct agent_state and None prompt_data for working state."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._insert_session(str(mock_db_path), "$1", "agent1")
+
+        with patch("waggle.server.capture_pane", new_callable=AsyncMock) as mock_capture, \
+             patch("waggle.server.state_parser.parse") as mock_parse:
+            mock_capture.return_value = {"status": "success", "content": "Esc to interrupt"}
+            mock_parse.return_value = ("working", None)
+
+            result = await read_pane("$1")
+
+        assert result["status"] == "success"
+        assert result["agent_state"] == "working"
+        assert result["content"] == "Esc to interrupt"
+        assert result["prompt_data"] is None
+
+    @pytest.mark.asyncio
+    async def test_returns_done_state(self, mock_db_path):
+        """Verify correct agent_state and None prompt_data for done state."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._insert_session(str(mock_db_path), "$1", "agent1")
+
+        with patch("waggle.server.capture_pane", new_callable=AsyncMock) as mock_capture, \
+             patch("waggle.server.state_parser.parse") as mock_parse:
+            mock_capture.return_value = {"status": "success", "content": ">\n"}
+            mock_parse.return_value = ("done", None)
+
+            result = await read_pane("$1")
+
+        assert result["status"] == "success"
+        assert result["agent_state"] == "done"
+        assert result["prompt_data"] is None
+
+    @pytest.mark.asyncio
+    async def test_returns_ask_user_state_with_prompt_data(self, mock_db_path):
+        """Verify correct agent_state and populated prompt_data for ask_user state."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._insert_session(str(mock_db_path), "$1", "agent1")
+
+        expected_prompt_data = {"question": "Pick one", "options": [{"number": 1, "label": "Yes", "description": ""}]}
+
+        with patch("waggle.server.capture_pane", new_callable=AsyncMock) as mock_capture, \
+             patch("waggle.server.state_parser.parse") as mock_parse:
+            mock_capture.return_value = {"status": "success", "content": "Pick one\n❯ ───\n❯ 1. Yes"}
+            mock_parse.return_value = ("ask_user", expected_prompt_data)
+
+            result = await read_pane("$1")
+
+        assert result["status"] == "success"
+        assert result["agent_state"] == "ask_user"
+        assert result["prompt_data"] == expected_prompt_data
+
+    @pytest.mark.asyncio
+    async def test_returns_check_permission_state_with_prompt_data(self, mock_db_path):
+        """Verify correct agent_state and populated prompt_data for check_permission state."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._insert_session(str(mock_db_path), "$1", "agent1")
+
+        expected_prompt_data = {"tool_type": "Bash", "command": "rm -rf /tmp", "description": ""}
+
+        with patch("waggle.server.capture_pane", new_callable=AsyncMock) as mock_capture, \
+             patch("waggle.server.state_parser.parse") as mock_parse:
+            mock_capture.return_value = {"status": "success", "content": "Permission rule\nDo you want to proceed?"}
+            mock_parse.return_value = ("check_permission", expected_prompt_data)
+
+            result = await read_pane("$1")
+
+        assert result["status"] == "success"
+        assert result["agent_state"] == "check_permission"
+        assert result["prompt_data"] == expected_prompt_data
+
+    @pytest.mark.asyncio
+    async def test_returns_unknown_state(self, mock_db_path):
+        """Verify correct agent_state and None prompt_data for unknown state."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._insert_session(str(mock_db_path), "$1", "agent1")
+
+        with patch("waggle.server.capture_pane", new_callable=AsyncMock) as mock_capture, \
+             patch("waggle.server.state_parser.parse") as mock_parse:
+            mock_capture.return_value = {"status": "success", "content": "random output"}
+            mock_parse.return_value = ("unknown", None)
+
+            result = await read_pane("$1")
+
+        assert result["status"] == "success"
+        assert result["agent_state"] == "unknown"
+        assert result["prompt_data"] is None
+
+    @pytest.mark.asyncio
+    async def test_content_always_populated(self, mock_db_path):
+        """Verify content field is always present and populated on success."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._insert_session(str(mock_db_path), "$1", "agent1")
+
+        with patch("waggle.server.capture_pane", new_callable=AsyncMock) as mock_capture, \
+             patch("waggle.server.state_parser.parse") as mock_parse:
+            mock_capture.return_value = {"status": "success", "content": "actual pane text here"}
+            mock_parse.return_value = ("working", None)
+
+            result = await read_pane("$1")
+
+        assert result["status"] == "success"
+        assert "content" in result
+        assert result["content"] == "actual pane text here"
+
+    @pytest.mark.asyncio
+    async def test_prompt_data_none_for_working(self, mock_db_path):
+        """Verify prompt_data is None for working state."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._insert_session(str(mock_db_path), "$1", "agent1")
+
+        with patch("waggle.server.capture_pane", new_callable=AsyncMock) as mock_capture, \
+             patch("waggle.server.state_parser.parse") as mock_parse:
+            mock_capture.return_value = {"status": "success", "content": "content"}
+            mock_parse.return_value = ("working", None)
+
+            result = await read_pane("$1")
+
+        assert result["prompt_data"] is None
+
+    @pytest.mark.asyncio
+    async def test_prompt_data_none_for_done(self, mock_db_path):
+        """Verify prompt_data is None for done state."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._insert_session(str(mock_db_path), "$1", "agent1")
+
+        with patch("waggle.server.capture_pane", new_callable=AsyncMock) as mock_capture, \
+             patch("waggle.server.state_parser.parse") as mock_parse:
+            mock_capture.return_value = {"status": "success", "content": ">"}
+            mock_parse.return_value = ("done", None)
+
+            result = await read_pane("$1")
+
+        assert result["prompt_data"] is None
+
+    @pytest.mark.asyncio
+    async def test_prompt_data_none_for_unknown(self, mock_db_path):
+        """Verify prompt_data is None for unknown state."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._insert_session(str(mock_db_path), "$1", "agent1")
+
+        with patch("waggle.server.capture_pane", new_callable=AsyncMock) as mock_capture, \
+             patch("waggle.server.state_parser.parse") as mock_parse:
+            mock_capture.return_value = {"status": "success", "content": "noise"}
+            mock_parse.return_value = ("unknown", None)
+
+            result = await read_pane("$1")
+
+        assert result["prompt_data"] is None
+
+    @pytest.mark.asyncio
+    async def test_prompt_data_populated_for_ask_user(self, mock_db_path):
+        """Verify prompt_data is not None for ask_user state."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._insert_session(str(mock_db_path), "$1", "agent1")
+
+        prompt_data = {"question": "Which option?", "options": []}
+
+        with patch("waggle.server.capture_pane", new_callable=AsyncMock) as mock_capture, \
+             patch("waggle.server.state_parser.parse") as mock_parse:
+            mock_capture.return_value = {"status": "success", "content": "content"}
+            mock_parse.return_value = ("ask_user", prompt_data)
+
+            result = await read_pane("$1")
+
+        assert result["prompt_data"] is not None
+        assert result["prompt_data"]["question"] == "Which option?"
+
+    @pytest.mark.asyncio
+    async def test_prompt_data_populated_for_check_permission(self, mock_db_path):
+        """Verify prompt_data is not None for check_permission state."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._insert_session(str(mock_db_path), "$1", "agent1")
+
+        prompt_data = {"tool_type": "Bash", "command": "ls", "description": "List files"}
+
+        with patch("waggle.server.capture_pane", new_callable=AsyncMock) as mock_capture, \
+             patch("waggle.server.state_parser.parse") as mock_parse:
+            mock_capture.return_value = {"status": "success", "content": "content"}
+            mock_parse.return_value = ("check_permission", prompt_data)
+
+            result = await read_pane("$1")
+
+        assert result["prompt_data"] is not None
+        assert result["prompt_data"]["tool_type"] == "Bash"
+
+    @pytest.mark.asyncio
+    async def test_tmux_capture_failure_returns_error(self, mock_db_path):
+        """Verify tmux capture failure returns error dict, not a crash."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._insert_session(str(mock_db_path), "$1", "agent1")
+
+        with patch("waggle.server.capture_pane", new_callable=AsyncMock) as mock_capture:
+            mock_capture.return_value = {"status": "error", "message": "pane not found"}
+
+            result = await read_pane("$1")
+
+        assert result["status"] == "error"
+        assert "pane not found" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_scrollback_passed_through(self, mock_db_path):
+        """Verify scrollback parameter is forwarded to capture_pane."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._insert_session(str(mock_db_path), "$1", "agent1")
+
+        with patch("waggle.server.capture_pane", new_callable=AsyncMock) as mock_capture, \
+             patch("waggle.server.state_parser.parse") as mock_parse:
+            mock_capture.return_value = {"status": "success", "content": "content"}
+            mock_parse.return_value = ("done", None)
+
+            await read_pane("$1", scrollback=200)
+
+        mock_capture.assert_called_once_with("$1", None, 200)
+
+    @pytest.mark.asyncio
+    async def test_pane_id_omitted_passes_none_to_capture(self, mock_db_path):
+        """Verify pane_id defaults to None and is passed as None to capture_pane."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._insert_session(str(mock_db_path), "$1", "agent1")
+
+        with patch("waggle.server.capture_pane", new_callable=AsyncMock) as mock_capture, \
+             patch("waggle.server.state_parser.parse") as mock_parse:
+            mock_capture.return_value = {"status": "success", "content": "content"}
+            mock_parse.return_value = ("done", None)
+
+            await read_pane("$1")
+
+        mock_capture.assert_called_once_with("$1", None, 50)
+
+    @pytest.mark.asyncio
+    async def test_pane_id_provided_passed_to_capture(self, mock_db_path):
+        """Verify provided pane_id is forwarded to capture_pane."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._insert_session(str(mock_db_path), "$1", "agent1")
+
+        with patch("waggle.server.capture_pane", new_callable=AsyncMock) as mock_capture, \
+             patch("waggle.server.state_parser.parse") as mock_parse:
+            mock_capture.return_value = {"status": "success", "content": "content"}
+            mock_parse.return_value = ("done", None)
+
+            await read_pane("$1", pane_id="%3")
+
+        mock_capture.assert_called_once_with("$1", "%3", 50)
+
+    @pytest.mark.asyncio
+    async def test_invalid_pane_id_error_propagated(self, mock_db_path):
+        """Verify capture_pane error from invalid pane_id propagates as error."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._insert_session(str(mock_db_path), "$1", "agent1")
+
+        with patch("waggle.server.capture_pane", new_callable=AsyncMock) as mock_capture:
+            mock_capture.return_value = {
+                "status": "error",
+                "message": "Pane '%99' does not belong to session '$1'",
+            }
+
+            result = await read_pane("$1", pane_id="%99")
+
+        assert result["status"] == "error"
+        assert "%99" in result["message"]

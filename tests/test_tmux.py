@@ -18,6 +18,10 @@ from waggle.tmux import (
     validate_session_name_id,
     _check_llm_running_sync,
     check_llm_running,
+    _capture_pane_sync,
+    capture_pane,
+    _validate_pane_id_sync,
+    validate_pane_id,
 )
 
 
@@ -419,3 +423,253 @@ class TestCheckLlmRunningAsync:
 
         mock_sync.assert_called_once_with("$0")
         assert result is True
+
+
+class TestCapturePaneSync:
+    """Tests for _capture_pane_sync() — sync pane capture via libtmux."""
+
+    @patch("waggle.tmux.libtmux.Server")
+    def test_captures_active_pane_when_no_pane_id(self, mock_server_cls):
+        """Verify captures active pane content when pane_id is None."""
+        mock_server = MagicMock()
+        mock_session = MagicMock()
+        mock_pane = MagicMock()
+        mock_pane.capture_pane.return_value = ["line1", "line2"]
+        mock_session.active_window.active_pane = mock_pane
+        mock_server.sessions.get.return_value = mock_session
+        mock_server_cls.return_value = mock_server
+
+        result = _capture_pane_sync("$0", None, 50)
+
+        assert result == {"status": "success", "content": "line1\nline2"}
+
+    @patch("waggle.tmux.libtmux.Server")
+    def test_captures_specific_pane_when_pane_id_given(self, mock_server_cls):
+        """Verify captures specific pane when pane_id is provided."""
+        mock_server = MagicMock()
+        mock_session = MagicMock()
+        mock_pane = MagicMock()
+        mock_pane.session_id = "$0"
+        mock_pane.capture_pane.return_value = ["output"]
+        mock_server.sessions.get.return_value = mock_session
+        mock_server.panes.get.return_value = mock_pane
+        mock_server_cls.return_value = mock_server
+
+        result = _capture_pane_sync("$0", "%5", 50)
+
+        mock_server.panes.get.assert_called_once_with(pane_id="%5")
+        assert result == {"status": "success", "content": "output"}
+
+    @patch("waggle.tmux.libtmux.Server")
+    def test_pane_not_in_session_returns_error(self, mock_server_cls):
+        """Verify returns error when pane does not belong to session."""
+        mock_server = MagicMock()
+        mock_session = MagicMock()
+        mock_pane = MagicMock()
+        mock_pane.session_id = "$99"
+        mock_server.sessions.get.return_value = mock_session
+        mock_server.panes.get.return_value = mock_pane
+        mock_server_cls.return_value = mock_server
+
+        result = _capture_pane_sync("$0", "%5", 50)
+
+        assert result["status"] == "error"
+        assert "does not belong" in result["message"]
+
+    @patch("waggle.tmux.libtmux.Server")
+    def test_session_not_found_returns_error(self, mock_server_cls):
+        """Verify returns error when session lookup raises Exception."""
+        mock_server = MagicMock()
+        mock_server.sessions.get.side_effect = Exception("session not found")
+        mock_server_cls.return_value = mock_server
+
+        result = _capture_pane_sync("$99", None, 50)
+
+        assert result["status"] == "error"
+        assert "session not found" in result["message"]
+
+    @patch("waggle.tmux.libtmux.Server")
+    def test_libtmux_exception_returns_error(self, mock_server_cls):
+        """Verify returns error on LibTmuxException."""
+        mock_server = MagicMock()
+        mock_server.sessions.get.side_effect = LibTmuxException("tmux error")
+        mock_server_cls.return_value = mock_server
+
+        result = _capture_pane_sync("$0", None, 50)
+
+        assert result["status"] == "error"
+        assert "tmux error" in result["message"]
+
+    @patch("waggle.tmux.libtmux.Server")
+    def test_empty_pane_returns_empty_content(self, mock_server_cls):
+        """Verify returns empty content when pane has no output."""
+        mock_server = MagicMock()
+        mock_session = MagicMock()
+        mock_pane = MagicMock()
+        mock_pane.capture_pane.return_value = []
+        mock_session.active_window.active_pane = mock_pane
+        mock_server.sessions.get.return_value = mock_session
+        mock_server_cls.return_value = mock_server
+
+        result = _capture_pane_sync("$0", None, 50)
+
+        assert result == {"status": "success", "content": ""}
+
+    @patch("waggle.tmux.libtmux.Server")
+    def test_scrollback_passed_to_capture_pane(self, mock_server_cls):
+        """Verify default scrollback=50 is passed as start=-50."""
+        mock_server = MagicMock()
+        mock_session = MagicMock()
+        mock_pane = MagicMock()
+        mock_pane.capture_pane.return_value = []
+        mock_session.active_window.active_pane = mock_pane
+        mock_server.sessions.get.return_value = mock_session
+        mock_server_cls.return_value = mock_server
+
+        _capture_pane_sync("$0", None, 50)
+
+        mock_pane.capture_pane.assert_called_once_with(start=-50)
+
+    @patch("waggle.tmux.libtmux.Server")
+    def test_custom_scrollback_passed(self, mock_server_cls):
+        """Verify custom scrollback=100 is passed as start=-100."""
+        mock_server = MagicMock()
+        mock_session = MagicMock()
+        mock_pane = MagicMock()
+        mock_pane.capture_pane.return_value = []
+        mock_session.active_window.active_pane = mock_pane
+        mock_server.sessions.get.return_value = mock_session
+        mock_server_cls.return_value = mock_server
+
+        _capture_pane_sync("$0", None, 100)
+
+        mock_pane.capture_pane.assert_called_once_with(start=-100)
+
+
+class TestCapturePaneAsync:
+    """Tests for capture_pane() — async wrapper delegating to _capture_pane_sync."""
+
+    @pytest.mark.asyncio
+    @patch("waggle.tmux._capture_pane_sync")
+    async def test_delegates_to_sync(self, mock_sync):
+        """Verify capture_pane delegates to _capture_pane_sync with defaults."""
+        mock_sync.return_value = {"status": "success", "content": "hello"}
+
+        result = await capture_pane("$0")
+
+        mock_sync.assert_called_once_with("$0", None, 50)
+        assert result == {"status": "success", "content": "hello"}
+
+    @pytest.mark.asyncio
+    @patch("waggle.tmux._capture_pane_sync")
+    async def test_passes_pane_id_and_scrollback(self, mock_sync):
+        """Verify capture_pane passes pane_id and scrollback to sync."""
+        mock_sync.return_value = {"status": "success", "content": "data"}
+
+        result = await capture_pane("$0", pane_id="%5", scrollback=100)
+
+        mock_sync.assert_called_once_with("$0", "%5", 100)
+        assert result == {"status": "success", "content": "data"}
+
+
+class TestValidatePaneIdSync:
+    """Tests for _validate_pane_id_sync() — sync pane-session membership check."""
+
+    @patch("waggle.tmux.libtmux.Server")
+    def test_success(self, mock_server_cls):
+        """Verify returns {"status": "success"} when pane belongs to session."""
+        mock_server = MagicMock()
+        mock_session = MagicMock()
+        mock_pane = MagicMock()
+        mock_pane.session_id = "$0"
+        mock_server.sessions.get.return_value = mock_session
+        mock_server.panes.get.return_value = mock_pane
+        mock_server_cls.return_value = mock_server
+
+        result = _validate_pane_id_sync("$0", "%3")
+
+        assert result == {"status": "success"}
+
+    @patch("waggle.tmux.libtmux.Server")
+    def test_invalid_pane_id_returns_error(self, mock_server_cls):
+        """Verify returns error dict when pane lookup raises Exception."""
+        mock_server = MagicMock()
+        mock_session = MagicMock()
+        mock_server.sessions.get.return_value = mock_session
+        mock_server.panes.get.side_effect = Exception("pane not found")
+        mock_server_cls.return_value = mock_server
+
+        result = _validate_pane_id_sync("$0", "%99")
+
+        assert result["status"] == "error"
+        assert result["message"]
+
+    @patch("waggle.tmux.libtmux.Server")
+    def test_pane_from_different_session_returns_error(self, mock_server_cls):
+        """Verify returns descriptive error when pane belongs to different session."""
+        mock_server = MagicMock()
+        mock_session = MagicMock()
+        mock_pane = MagicMock()
+        mock_pane.session_id = "$99"
+        mock_server.sessions.get.return_value = mock_session
+        mock_server.panes.get.return_value = mock_pane
+        mock_server_cls.return_value = mock_server
+
+        result = _validate_pane_id_sync("$0", "%3")
+
+        assert result["status"] == "error"
+        assert "%3" in result["message"]
+        assert "$0" in result["message"]
+
+    @patch("waggle.tmux.libtmux.Server")
+    def test_libtmux_exception_caught_returns_error(self, mock_server_cls):
+        """Verify LibTmuxException is caught and returned as error dict."""
+        mock_server = MagicMock()
+        mock_server.sessions.get.side_effect = LibTmuxException("no session")
+        mock_server_cls.return_value = mock_server
+
+        result = _validate_pane_id_sync("$0", "%3")
+
+        assert result["status"] == "error"
+        assert result["message"]
+
+    @patch("waggle.tmux.libtmux.Server")
+    def test_session_validation_called_with_correct_id(self, mock_server_cls):
+        """Verify sessions.get is called with the correct session_id."""
+        mock_server = MagicMock()
+        mock_session = MagicMock()
+        mock_pane = MagicMock()
+        mock_pane.session_id = "$2"
+        mock_server.sessions.get.return_value = mock_session
+        mock_server.panes.get.return_value = mock_pane
+        mock_server_cls.return_value = mock_server
+
+        _validate_pane_id_sync("$2", "%7")
+
+        mock_server.sessions.get.assert_called_once_with(session_id="$2")
+        mock_server.panes.get.assert_called_once_with(pane_id="%7")
+
+
+class TestValidatePaneIdAsync:
+    """Tests for validate_pane_id() — async wrapper delegating to _validate_pane_id_sync."""
+
+    @pytest.mark.asyncio
+    @patch("waggle.tmux._validate_pane_id_sync")
+    async def test_delegates_to_sync(self, mock_sync):
+        """Verify validate_pane_id delegates to _validate_pane_id_sync."""
+        mock_sync.return_value = {"status": "success"}
+
+        result = await validate_pane_id("$0", "%3")
+
+        mock_sync.assert_called_once_with("$0", "%3")
+        assert result == {"status": "success"}
+
+    @pytest.mark.asyncio
+    @patch("waggle.tmux._validate_pane_id_sync")
+    async def test_returns_error_from_sync(self, mock_sync):
+        """Verify validate_pane_id passes through error dict from _validate_pane_id_sync."""
+        mock_sync.return_value = {"status": "error", "message": "Pane '%3' does not belong to session '$0'"}
+
+        result = await validate_pane_id("$0", "%3")
+
+        assert result == {"status": "error", "message": "Pane '%3' does not belong to session '$0'"}
