@@ -6,6 +6,7 @@ Server() is instantiated per-call (no module-level side effects).
 """
 
 import asyncio
+from pathlib import Path
 
 import libtmux
 from libtmux.exc import LibTmuxException
@@ -306,3 +307,128 @@ async def clear_pane_input(session_id: str, pane_id: str | None = None) -> dict:
         {"status": "success"} or {"status": "error", "message": str}
     """
     return await asyncio.to_thread(_clear_pane_input_sync, session_id, pane_id)
+
+
+def _create_session_sync(session_name: str, repo_path: str) -> dict:
+    try:
+        server = libtmux.Server()
+        session = server.new_session(
+            session_name=session_name,
+            start_directory=repo_path,
+            attach=False,
+        )
+        return {
+            "status": "success",
+            "session_id": session.session_id,
+            "session_name": session.session_name,
+            "session_created": session.session_created,
+        }
+    except LibTmuxException as e:
+        return {"status": "error", "message": str(e)}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+async def create_session(session_name: str, repo_path: str) -> dict:
+    """Create a new tmux session at the given directory.
+
+    Args:
+        session_name: Name for the new tmux session.
+        repo_path: Absolute path to use as the session's start directory.
+
+    Returns:
+        {"status": "success", "session_id": str, "session_name": str, "session_created": str}
+        or {"status": "error", "message": str}
+    """
+    return await asyncio.to_thread(_create_session_sync, session_name, repo_path)
+
+
+def _launch_agent_in_pane_sync(
+    session_id: str,
+    agent: str,
+    model: str | None,
+    settings: str | None,
+) -> dict:
+    try:
+        server = libtmux.Server()
+        session = server.sessions.get(session_id=session_id)
+        pane = session.active_window.active_pane
+        cmd = agent.lower()
+        if model:
+            cmd += f" --model {model.lower()}"
+        if settings:
+            cmd += f" {settings}"
+        pane.send_keys(cmd, enter=True)
+        return {"status": "success"}
+    except LibTmuxException as e:
+        return {"status": "error", "message": str(e)}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+async def launch_agent_in_pane(
+    session_id: str,
+    agent: str,
+    model: str | None = None,
+    settings: str | None = None,
+) -> dict:
+    """Send an LLM agent launch command to the active pane of a session.
+
+    Args:
+        session_id: The tmux session ID (e.g. "$1").
+        agent: Agent binary name, "claude" or "opencode".
+        model: Optional model name (e.g. "sonnet", "haiku", "opus").
+        settings: Optional extra CLI flags (e.g. "--dangerously-skip-permissions").
+
+    Returns:
+        {"status": "success"} or {"status": "error", "message": str}
+    """
+    return await asyncio.to_thread(_launch_agent_in_pane_sync, session_id, agent, model, settings)
+
+
+def _resolve_session_sync(session_name: str, repo_path: str) -> dict:
+    try:
+        server = libtmux.Server()
+        try:
+            session = server.sessions.get(session_name=session_name)
+        except Exception:
+            return {"action": "create"}
+
+        # Session exists — check LLM
+        pane = session.active_window.active_pane
+        if is_llm_running(pane):
+            return {"action": "error", "message": "LLM already running in session"}
+
+        # No LLM — compare repo paths
+        session_path = session.session_path or ""
+        if Path(session_path).resolve() == Path(repo_path).resolve():
+            return {
+                "action": "reuse",
+                "session_id": session.session_id,
+                "session_name": session.session_name,
+                "session_created": session.session_created,
+            }
+        return {"action": "error", "message": "session exists but is in wrong repo"}
+    except LibTmuxException as e:
+        return {"action": "error", "message": str(e)}
+    except Exception as e:
+        return {"action": "error", "message": str(e)}
+
+
+async def resolve_session(session_name: str, repo_path: str) -> dict:
+    """Resolve session creation/reuse strategy (SR-6.2).
+
+    Cases:
+    1. Session doesn't exist → {action: "create"}
+    2. Session exists + LLM running → {action: "error", message: "LLM already running in session"}
+    3. Session exists + no LLM + same repo → {action: "reuse", session_id, session_name, session_created}
+    4. Session exists + no LLM + different repo → {action: "error", message: "session exists but is in wrong repo"}
+
+    Args:
+        session_name: tmux session name to check.
+        repo_path: Absolute path to compare against the session's working directory.
+
+    Returns:
+        dict with "action" key ("create", "reuse", or "error")
+    """
+    return await asyncio.to_thread(_resolve_session_sync, session_name, repo_path)

@@ -26,6 +26,12 @@ from waggle.tmux import (
     send_keys_to_pane,
     _clear_pane_input_sync,
     clear_pane_input,
+    _create_session_sync,
+    create_session,
+    _launch_agent_in_pane_sync,
+    launch_agent_in_pane,
+    _resolve_session_sync,
+    resolve_session,
 )
 
 
@@ -925,3 +931,277 @@ class TestClearPaneInputAsync:
         result = await clear_pane_input("$0")
 
         assert result == {"status": "error", "message": "no session"}
+
+
+class TestCreateSessionSync:
+    """Tests for _create_session_sync() — new tmux session creation."""
+
+    @patch("waggle.tmux.libtmux.Server")
+    def test_creates_session_returns_ids(self, mock_server_cls):
+        """Verify new session creation returns session_id, name, and created timestamp."""
+        mock_server = MagicMock()
+        mock_session = MagicMock()
+        mock_session.session_id = "$5"
+        mock_session.session_name = "my-agent"
+        mock_session.session_created = "1700000000"
+        mock_server.new_session.return_value = mock_session
+        mock_server_cls.return_value = mock_server
+
+        result = _create_session_sync("my-agent", "/home/user/repo")
+
+        assert result["status"] == "success"
+        assert result["session_id"] == "$5"
+        assert result["session_name"] == "my-agent"
+        assert result["session_created"] == "1700000000"
+        mock_server.new_session.assert_called_once_with(
+            session_name="my-agent",
+            start_directory="/home/user/repo",
+            attach=False,
+        )
+
+    @patch("waggle.tmux.libtmux.Server")
+    def test_libtmux_exception_caught(self, mock_server_cls):
+        """Verify LibTmuxException from new_session is caught and returned as error dict."""
+        mock_server = MagicMock()
+        mock_server.new_session.side_effect = LibTmuxException("session already exists")
+        mock_server_cls.return_value = mock_server
+
+        result = _create_session_sync("my-agent", "/repo")
+
+        assert result["status"] == "error"
+        assert result["message"]
+
+    @patch("waggle.tmux.libtmux.Server")
+    def test_generic_exception_caught(self, mock_server_cls):
+        """Verify generic Exception is caught and returned as error dict."""
+        mock_server_cls.side_effect = Exception("tmux not running")
+
+        result = _create_session_sync("my-agent", "/repo")
+
+        assert result["status"] == "error"
+        assert "tmux not running" in result["message"]
+
+
+class TestCreateSessionAsync:
+    """Tests for create_session() — async wrapper."""
+
+    @pytest.mark.asyncio
+    @patch("waggle.tmux._create_session_sync")
+    async def test_delegates_to_sync(self, mock_sync):
+        """Verify create_session delegates to _create_session_sync."""
+        mock_sync.return_value = {
+            "status": "success",
+            "session_id": "$5",
+            "session_name": "my-agent",
+            "session_created": "1700000000",
+        }
+
+        result = await create_session("my-agent", "/repo")
+
+        mock_sync.assert_called_once_with("my-agent", "/repo")
+        assert result["status"] == "success"
+
+
+class TestLaunchAgentInPaneSync:
+    """Tests for _launch_agent_in_pane_sync() — sending agent launch command to pane."""
+
+    @patch("waggle.tmux.libtmux.Server")
+    def test_sends_claude_command(self, mock_server_cls):
+        """Verify 'claude' is sent to the active pane with Enter."""
+        mock_server = MagicMock()
+        mock_session = MagicMock()
+        mock_pane = MagicMock()
+        mock_session.active_window.active_pane = mock_pane
+        mock_server.sessions.get.return_value = mock_session
+        mock_server_cls.return_value = mock_server
+
+        result = _launch_agent_in_pane_sync("$1", "claude", None, None)
+
+        assert result == {"status": "success"}
+        mock_pane.send_keys.assert_called_once_with("claude", enter=True)
+
+    @patch("waggle.tmux.libtmux.Server")
+    def test_sends_claude_with_model(self, mock_server_cls):
+        """Verify model flag appended to claude command."""
+        mock_server = MagicMock()
+        mock_session = MagicMock()
+        mock_pane = MagicMock()
+        mock_session.active_window.active_pane = mock_pane
+        mock_server.sessions.get.return_value = mock_session
+        mock_server_cls.return_value = mock_server
+
+        result = _launch_agent_in_pane_sync("$1", "claude", "sonnet", None)
+
+        assert result == {"status": "success"}
+        mock_pane.send_keys.assert_called_once_with("claude --model sonnet", enter=True)
+
+    @patch("waggle.tmux.libtmux.Server")
+    def test_sends_opencode_without_model(self, mock_server_cls):
+        """Verify opencode is sent without model flag when model is None."""
+        mock_server = MagicMock()
+        mock_session = MagicMock()
+        mock_pane = MagicMock()
+        mock_session.active_window.active_pane = mock_pane
+        mock_server.sessions.get.return_value = mock_session
+        mock_server_cls.return_value = mock_server
+
+        result = _launch_agent_in_pane_sync("$1", "opencode", None, None)
+
+        assert result == {"status": "success"}
+        mock_pane.send_keys.assert_called_once_with("opencode", enter=True)
+
+    @patch("waggle.tmux.libtmux.Server")
+    def test_appends_settings_to_command(self, mock_server_cls):
+        """Verify extra settings flags are appended to the agent command."""
+        mock_server = MagicMock()
+        mock_session = MagicMock()
+        mock_pane = MagicMock()
+        mock_session.active_window.active_pane = mock_pane
+        mock_server.sessions.get.return_value = mock_session
+        mock_server_cls.return_value = mock_server
+
+        result = _launch_agent_in_pane_sync("$1", "claude", None, "--dangerously-skip-permissions")
+
+        assert result == {"status": "success"}
+        mock_pane.send_keys.assert_called_once_with(
+            "claude --dangerously-skip-permissions", enter=True
+        )
+
+    @patch("waggle.tmux.libtmux.Server")
+    def test_model_and_settings_combined(self, mock_server_cls):
+        """Verify both model and settings are included in the command."""
+        mock_server = MagicMock()
+        mock_session = MagicMock()
+        mock_pane = MagicMock()
+        mock_session.active_window.active_pane = mock_pane
+        mock_server.sessions.get.return_value = mock_session
+        mock_server_cls.return_value = mock_server
+
+        result = _launch_agent_in_pane_sync("$1", "claude", "haiku", "--no-interactive")
+
+        assert result == {"status": "success"}
+        call_args = mock_pane.send_keys.call_args[0][0]
+        assert "claude" in call_args
+        assert "--model haiku" in call_args
+        assert "--no-interactive" in call_args
+
+    @patch("waggle.tmux.libtmux.Server")
+    def test_libtmux_exception_caught(self, mock_server_cls):
+        """Verify LibTmuxException is caught and returned as error dict."""
+        mock_server = MagicMock()
+        mock_server.sessions.get.side_effect = LibTmuxException("no session")
+        mock_server_cls.return_value = mock_server
+
+        result = _launch_agent_in_pane_sync("$1", "claude", None, None)
+
+        assert result["status"] == "error"
+        assert result["message"]
+
+
+class TestLaunchAgentInPaneAsync:
+    """Tests for launch_agent_in_pane() — async wrapper."""
+
+    @pytest.mark.asyncio
+    @patch("waggle.tmux._launch_agent_in_pane_sync")
+    async def test_delegates_to_sync(self, mock_sync):
+        """Verify launch_agent_in_pane delegates to _launch_agent_in_pane_sync."""
+        mock_sync.return_value = {"status": "success"}
+
+        result = await launch_agent_in_pane("$1", "claude", "sonnet", "--no-interactive")
+
+        mock_sync.assert_called_once_with("$1", "claude", "sonnet", "--no-interactive")
+        assert result == {"status": "success"}
+
+
+class TestResolveSessionSync:
+    """Tests for _resolve_session_sync() — 4-case session resolution logic (SR-6.2)."""
+
+    @patch("waggle.tmux.libtmux.Server")
+    def test_session_not_found_returns_create(self, mock_server_cls):
+        """Case 1: Session doesn't exist → action='create'."""
+        mock_server = MagicMock()
+        mock_server.sessions.get.side_effect = Exception("session not found")
+        mock_server_cls.return_value = mock_server
+
+        result = _resolve_session_sync("new-session", "/repo")
+
+        assert result == {"action": "create"}
+
+    @patch("waggle.tmux.libtmux.Server")
+    def test_llm_running_returns_error(self, mock_server_cls):
+        """Case 2: Session exists + LLM running → error 'LLM already running'."""
+        mock_server = MagicMock()
+        mock_session = MagicMock()
+        mock_pane = MagicMock()
+        mock_pane.pane_current_command = "claude"
+        mock_session.active_window.active_pane = mock_pane
+        mock_server.sessions.get.return_value = mock_session
+        mock_server_cls.return_value = mock_server
+
+        result = _resolve_session_sync("existing-session", "/repo")
+
+        assert result["action"] == "error"
+        assert "LLM already running" in result["message"]
+
+    @patch("waggle.tmux.libtmux.Server")
+    def test_no_llm_same_repo_returns_reuse(self, mock_server_cls, tmp_path):
+        """Case 3: Session exists + no LLM + same repo → action='reuse'."""
+        mock_server = MagicMock()
+        mock_session = MagicMock()
+        mock_pane = MagicMock()
+        mock_pane.pane_current_command = "zsh"
+        mock_session.active_window.active_pane = mock_pane
+        mock_session.session_path = str(tmp_path)
+        mock_session.session_id = "$3"
+        mock_session.session_name = "existing-session"
+        mock_session.session_created = "1700000001"
+        mock_server.sessions.get.return_value = mock_session
+        mock_server_cls.return_value = mock_server
+
+        result = _resolve_session_sync("existing-session", str(tmp_path))
+
+        assert result["action"] == "reuse"
+        assert result["session_id"] == "$3"
+        assert result["session_name"] == "existing-session"
+
+    @patch("waggle.tmux.libtmux.Server")
+    def test_no_llm_different_repo_returns_error(self, mock_server_cls):
+        """Case 4: Session exists + no LLM + different repo → error 'wrong repo'."""
+        mock_server = MagicMock()
+        mock_session = MagicMock()
+        mock_pane = MagicMock()
+        mock_pane.pane_current_command = "bash"
+        mock_session.active_window.active_pane = mock_pane
+        mock_session.session_path = "/some/other/path"
+        mock_server.sessions.get.return_value = mock_session
+        mock_server_cls.return_value = mock_server
+
+        result = _resolve_session_sync("existing-session", "/my/repo")
+
+        assert result["action"] == "error"
+        assert "wrong repo" in result["message"]
+
+    @patch("waggle.tmux.libtmux.Server")
+    def test_libtmux_exception_returns_error(self, mock_server_cls):
+        """Verify LibTmuxException from server init is caught as error."""
+        mock_server_cls.side_effect = LibTmuxException("tmux unavailable")
+
+        result = _resolve_session_sync("session", "/repo")
+
+        assert result["action"] == "error"
+        assert result["message"]
+
+
+class TestResolveSessionAsync:
+    """Tests for resolve_session() — async wrapper."""
+
+    @pytest.mark.asyncio
+    @patch("waggle.tmux._resolve_session_sync")
+    async def test_delegates_to_sync(self, mock_sync):
+        """Verify resolve_session delegates to _resolve_session_sync."""
+        mock_sync.return_value = {"action": "create"}
+
+        result = await resolve_session("session", "/repo")
+
+        mock_sync.assert_called_once_with("session", "/repo")
+        assert result == {"action": "create"}

@@ -23,6 +23,9 @@ from waggle.tmux import (
     capture_pane,
     send_keys_to_pane,
     clear_pane_input,
+    create_session,
+    launch_agent_in_pane,
+    resolve_session,
 )
 
 # Initialize FastMCP instance
@@ -519,6 +522,147 @@ async def send_command(
     return {
         "status": "error",
         "message": "command delivery unconfirmed: agent did not transition within 5 seconds",
+    }
+
+
+@mcp.tool()
+async def spawn_agent(
+    repo: str,
+    session_name: str,
+    agent: str,
+    model: str | None = None,
+    command: str | None = None,
+    settings: str | None = None,
+    ctx: Context = None,
+) -> dict:
+    """Launch a Claude or OpenCode agent in a tmux session.
+
+    Creates a new session or reuses an existing one (see SR-6.2), launches the
+    agent, registers it in waggle's DB, and optionally delivers an initial command
+    once the agent reaches ready state.
+
+    Args:
+        repo: Absolute path to the repository directory for the agent.
+        session_name: tmux session name to create or reuse.
+        agent: Agent type — "claude" or "opencode".
+        model: Optional model name (e.g. "sonnet", "haiku", "opus").
+        command: Optional initial command to deliver after agent reaches ready state.
+        settings: Optional extra CLI flags (e.g. "--dangerously-skip-permissions").
+
+    Returns:
+        {"status": "success"|"error", "session_id": str|None, "session_name": str, "message": str}
+    """
+    if agent.lower() not in ("claude", "opencode"):
+        return {
+            "status": "error",
+            "session_id": None,
+            "session_name": session_name,
+            "message": f"invalid agent '{agent}'; must be 'claude' or 'opencode'",
+        }
+
+    repo_path = str(Path(repo).resolve())
+    db_path = get_db_path()
+
+    # Step 1: Resolve session
+    resolution = await resolve_session(session_name, repo_path)
+    action = resolution["action"]
+
+    if action == "error":
+        return {
+            "status": "error",
+            "session_id": None,
+            "session_name": session_name,
+            "message": resolution["message"],
+        }
+
+    if action == "create":
+        create_result = await create_session(session_name, repo_path)
+        if create_result["status"] != "success":
+            return {
+                "status": "error",
+                "session_id": None,
+                "session_name": session_name,
+                "message": create_result["message"],
+            }
+        session_id = create_result["session_id"]
+        session_created = create_result["session_created"]
+    else:  # reuse
+        session_id = resolution["session_id"]
+        session_created = resolution["session_created"]
+
+    # Step 2: Launch agent
+    launch_result = await launch_agent_in_pane(session_id, agent, model, settings)
+    if launch_result["status"] != "success":
+        return {
+            "status": "error",
+            "session_id": session_id,
+            "session_name": session_name,
+            "message": launch_result["message"],
+        }
+
+    # Step 3: DB registration (SR-6.5)
+    try:
+        key = f"{session_name}+{session_id}+{session_created}"
+        with connection(db_path) as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO state (key, repo, status, updated_at) VALUES (?, ?, ?, ?)",
+                (key, repo_path, "working", "now"),
+            )
+    except Exception as e:
+        return {
+            "status": "error",
+            "session_id": session_id,
+            "session_name": session_name,
+            "message": f"Failed to register agent in database: {str(e)}",
+        }
+
+    # Step 4: Without command — return immediately
+    if not command:
+        return {
+            "status": "success",
+            "session_id": session_id,
+            "session_name": session_name,
+            "message": "agent launched",
+        }
+
+    # Step 5: With command — poll until done (60s timeout at 1s intervals)
+    last_state = "unknown"
+    for _ in range(60):
+        await asyncio.sleep(1.0)
+        poll_result = await capture_pane(session_id)
+        if poll_result["status"] != "success":
+            continue
+        pane_state, _ = state_parser.parse(poll_result["content"])
+        last_state = pane_state
+        if pane_state == "done":
+            clear_result = await clear_pane_input(session_id)
+            if clear_result["status"] != "success":
+                return {
+                    "status": "error",
+                    "session_id": session_id,
+                    "session_name": session_name,
+                    "message": f"Failed to clear pane input: {clear_result['message']}",
+                }
+            send_result = await send_keys_to_pane(session_id, command)
+            if send_result["status"] != "success":
+                return {
+                    "status": "error",
+                    "session_id": session_id,
+                    "session_name": session_name,
+                    "message": f"Failed to send command: {send_result['message']}",
+                }
+            return {
+                "status": "success",
+                "session_id": session_id,
+                "session_name": session_name,
+                "message": "agent launched and command delivered",
+            }
+
+    return {
+        "status": "error",
+        "session_id": session_id,
+        "session_name": session_name,
+        "message": f"Agent readiness timeout after 60s. Last state: {last_state}",
     }
 
 

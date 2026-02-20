@@ -20,6 +20,7 @@ delete_repo_agents = server.delete_repo_agents.fn
 close_session = server.close_session.fn
 read_pane = server.read_pane.fn
 send_command = server.send_command.fn
+spawn_agent = server.spawn_agent.fn
 
 
 # Pytest fixtures for common mock patterns
@@ -1893,3 +1894,223 @@ class TestSendCommand:
 
         assert result["status"] == "error"
         assert "pane not found" in result["message"]
+
+
+class TestSpawnAgent:
+    """Tests for spawn_agent() MCP tool — launching agents in tmux sessions."""
+
+    def _get_db_session_keys(self, db_path: str) -> list[str]:
+        """Fetch all keys from state table."""
+        conn = sqlite3.connect(db_path)
+        keys = [row[0] for row in conn.execute("SELECT key FROM state").fetchall()]
+        conn.close()
+        return keys
+
+    @pytest.mark.asyncio
+    async def test_invalid_agent_returns_error(self, mock_db_path):
+        """Verify unsupported agent type is rejected immediately."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+
+        result = await spawn_agent("/repo", "my-session", "gpt4")
+
+        assert result["status"] == "error"
+        assert "invalid agent" in result["message"].lower()
+        assert result["session_id"] is None
+
+    @pytest.mark.asyncio
+    async def test_basic_spawn_no_command_success(self, mock_db_path):
+        """Verify spawn without command: creates session, registers DB, returns immediately."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+
+        with patch("waggle.server.resolve_session", new_callable=AsyncMock) as mock_resolve, \
+             patch("waggle.server.create_session", new_callable=AsyncMock) as mock_create, \
+             patch("waggle.server.launch_agent_in_pane", new_callable=AsyncMock) as mock_launch:
+            mock_resolve.return_value = {"action": "create"}
+            mock_create.return_value = {
+                "status": "success",
+                "session_id": "$5",
+                "session_name": "my-session",
+                "session_created": "1700000000",
+            }
+            mock_launch.return_value = {"status": "success"}
+
+            result = await spawn_agent("/repo", "my-session", "claude")
+
+        assert result["status"] == "success"
+        assert result["session_id"] == "$5"
+        assert result["session_name"] == "my-session"
+        assert "launched" in result["message"].lower()
+
+    @pytest.mark.asyncio
+    async def test_db_entry_registered_after_launch(self, mock_db_path):
+        """Verify composite DB key is created with correct format after spawn."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+
+        with patch("waggle.server.resolve_session", new_callable=AsyncMock) as mock_resolve, \
+             patch("waggle.server.create_session", new_callable=AsyncMock) as mock_create, \
+             patch("waggle.server.launch_agent_in_pane", new_callable=AsyncMock) as mock_launch:
+            mock_resolve.return_value = {"action": "create"}
+            mock_create.return_value = {
+                "status": "success",
+                "session_id": "$5",
+                "session_name": "my-session",
+                "session_created": "1700000000",
+            }
+            mock_launch.return_value = {"status": "success"}
+
+            await spawn_agent("/repo", "my-session", "claude")
+
+        keys = self._get_db_session_keys(str(mock_db_path))
+        assert any("my-session" in k and "$5" in k and "1700000000" in k for k in keys)
+
+    @pytest.mark.asyncio
+    async def test_session_resolution_llm_running_returns_error(self, mock_db_path):
+        """Verify error returned when session exists with LLM already running."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+
+        with patch("waggle.server.resolve_session", new_callable=AsyncMock) as mock_resolve:
+            mock_resolve.return_value = {
+                "action": "error",
+                "message": "LLM already running in session",
+            }
+
+            result = await spawn_agent("/repo", "existing-session", "claude")
+
+        assert result["status"] == "error"
+        assert "LLM already running" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_session_resolution_wrong_repo_returns_error(self, mock_db_path):
+        """Verify error returned when session exists but in wrong repo."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+
+        with patch("waggle.server.resolve_session", new_callable=AsyncMock) as mock_resolve:
+            mock_resolve.return_value = {
+                "action": "error",
+                "message": "session exists but is in wrong repo",
+            }
+
+            result = await spawn_agent("/my/repo", "existing-session", "claude")
+
+        assert result["status"] == "error"
+        assert "wrong repo" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_reuse_existing_session(self, mock_db_path):
+        """Verify reuse action launches agent in existing session without creating new one."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+
+        with patch("waggle.server.resolve_session", new_callable=AsyncMock) as mock_resolve, \
+             patch("waggle.server.create_session", new_callable=AsyncMock) as mock_create, \
+             patch("waggle.server.launch_agent_in_pane", new_callable=AsyncMock) as mock_launch:
+            mock_resolve.return_value = {
+                "action": "reuse",
+                "session_id": "$3",
+                "session_name": "existing-session",
+                "session_created": "1700000001",
+            }
+            mock_launch.return_value = {"status": "success"}
+
+            result = await spawn_agent("/repo", "existing-session", "claude")
+
+        mock_create.assert_not_called()
+        assert result["status"] == "success"
+        assert result["session_id"] == "$3"
+
+    @pytest.mark.asyncio
+    async def test_spawn_with_command_waits_and_delivers(self, mock_db_path):
+        """Verify spawn with command polls until done state then delivers command."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+
+        with patch("waggle.server.resolve_session", new_callable=AsyncMock) as mock_resolve, \
+             patch("waggle.server.create_session", new_callable=AsyncMock) as mock_create, \
+             patch("waggle.server.launch_agent_in_pane", new_callable=AsyncMock) as mock_launch, \
+             patch("waggle.server.capture_pane", new_callable=AsyncMock) as mock_capture, \
+             patch("waggle.server.state_parser.parse") as mock_parse, \
+             patch("waggle.server.clear_pane_input", new_callable=AsyncMock) as mock_clear, \
+             patch("waggle.server.send_keys_to_pane", new_callable=AsyncMock) as mock_send, \
+             patch("waggle.server.asyncio.sleep", new_callable=AsyncMock):
+            mock_resolve.return_value = {"action": "create"}
+            mock_create.return_value = {
+                "status": "success",
+                "session_id": "$5",
+                "session_name": "my-session",
+                "session_created": "1700000000",
+            }
+            mock_launch.return_value = {"status": "success"}
+            mock_capture.side_effect = [
+                {"status": "success", "content": "loading..."},
+                {"status": "success", "content": "loading..."},
+                {"status": "success", "content": "> "},
+            ]
+            mock_parse.side_effect = [("working", None), ("working", None), ("done", None)]
+            mock_clear.return_value = {"status": "success"}
+            mock_send.return_value = {"status": "success"}
+
+            result = await spawn_agent("/repo", "my-session", "claude", command="run tests")
+
+        assert result["status"] == "success"
+        assert "command delivered" in result["message"].lower()
+        mock_send.assert_called_once_with("$5", "run tests")
+
+    @pytest.mark.asyncio
+    async def test_readiness_timeout_returns_error_with_last_state(self, mock_db_path):
+        """Verify 60s timeout returns error with last known state included."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+
+        with patch("waggle.server.resolve_session", new_callable=AsyncMock) as mock_resolve, \
+             patch("waggle.server.create_session", new_callable=AsyncMock) as mock_create, \
+             patch("waggle.server.launch_agent_in_pane", new_callable=AsyncMock) as mock_launch, \
+             patch("waggle.server.capture_pane", new_callable=AsyncMock) as mock_capture, \
+             patch("waggle.server.state_parser.parse") as mock_parse, \
+             patch("waggle.server.asyncio.sleep", new_callable=AsyncMock):
+            mock_resolve.return_value = {"action": "create"}
+            mock_create.return_value = {
+                "status": "success",
+                "session_id": "$5",
+                "session_name": "my-session",
+                "session_created": "1700000000",
+            }
+            mock_launch.return_value = {"status": "success"}
+            # Never reaches done state
+            mock_capture.return_value = {"status": "success", "content": "loading..."}
+            mock_parse.return_value = ("working", None)
+
+            result = await spawn_agent("/repo", "my-session", "claude", command="run tests")
+
+        assert result["status"] == "error"
+        assert "timeout" in result["message"].lower() or "60s" in result["message"]
+        assert "working" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_return_contract_all_fields_present(self, mock_db_path):
+        """Verify all return paths include {status, session_id, session_name, message}."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+
+        with patch("waggle.server.resolve_session", new_callable=AsyncMock) as mock_resolve, \
+             patch("waggle.server.create_session", new_callable=AsyncMock) as mock_create, \
+             patch("waggle.server.launch_agent_in_pane", new_callable=AsyncMock) as mock_launch:
+            mock_resolve.return_value = {"action": "create"}
+            mock_create.return_value = {
+                "status": "success",
+                "session_id": "$5",
+                "session_name": "my-session",
+                "session_created": "1700000000",
+            }
+            mock_launch.return_value = {"status": "success"}
+
+            result = await spawn_agent("/repo", "my-session", "claude")
+
+        assert "status" in result
+        assert "session_id" in result
+        assert "session_name" in result
+        assert "message" in result
