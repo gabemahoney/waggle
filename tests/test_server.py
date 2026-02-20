@@ -1876,6 +1876,85 @@ class TestSendCommand:
         assert result["status"] == "error"
         assert "pane not found" in result["message"]
 
+    @pytest.mark.asyncio
+    async def test_ask_user_valid_option_does_not_send_ctrl_c(self, mock_db_path):
+        """Verify clear_pane_input (Ctrl+C) is NOT called for ask_user state."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._insert_session(str(mock_db_path), "$1", "agent1")
+
+        prompt_data = {
+            "question": "Choose one",
+            "options": [
+                {"number": 1, "label": "Yes"},
+                {"number": 2, "label": "No"},
+            ],
+        }
+
+        with patch("waggle.server.capture_pane", new_callable=AsyncMock) as mock_capture, \
+             patch("waggle.server.state_parser.parse") as mock_parse, \
+             patch("waggle.server.clear_pane_input", new_callable=AsyncMock) as mock_clear, \
+             patch("waggle.server.send_keys_to_pane", new_callable=AsyncMock) as mock_send:
+            mock_capture.side_effect = [
+                {"status": "success", "content": "prompt"},
+                {"status": "success", "content": "working"},
+            ]
+            mock_parse.side_effect = [("ask_user", prompt_data), ("working", None)]
+            mock_send.return_value = {"status": "success"}
+
+            result = await send_command("$1", "1")
+
+        assert result["status"] == "success"
+        mock_clear.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("command", ["1", "2"])
+    async def test_check_permission_does_not_send_ctrl_c(self, mock_db_path, command):
+        """Verify clear_pane_input (Ctrl+C) is NOT called for check_permission state."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._insert_session(str(mock_db_path), "$1", "agent1")
+
+        with patch("waggle.server.capture_pane", new_callable=AsyncMock) as mock_capture, \
+             patch("waggle.server.state_parser.parse") as mock_parse, \
+             patch("waggle.server.clear_pane_input", new_callable=AsyncMock) as mock_clear, \
+             patch("waggle.server.send_keys_to_pane", new_callable=AsyncMock) as mock_send:
+            mock_capture.side_effect = [
+                {"status": "success", "content": "permission prompt"},
+                {"status": "success", "content": "working"},
+            ]
+            mock_parse.side_effect = [("check_permission", {"tool_type": "Bash"}), ("working", None)]
+            mock_send.return_value = {"status": "success"}
+
+            result = await send_command("$1", command)
+
+        assert result["status"] == "success"
+        mock_clear.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_done_state_does_send_ctrl_c(self, mock_db_path):
+        """Verify clear_pane_input (Ctrl+C) IS called for done state (normal path preserved)."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._insert_session(str(mock_db_path), "$1", "agent1")
+
+        with patch("waggle.server.capture_pane", new_callable=AsyncMock) as mock_capture, \
+             patch("waggle.server.state_parser.parse") as mock_parse, \
+             patch("waggle.server.clear_pane_input", new_callable=AsyncMock) as mock_clear, \
+             patch("waggle.server.send_keys_to_pane", new_callable=AsyncMock) as mock_send:
+            mock_capture.side_effect = [
+                {"status": "success", "content": "> "},
+                {"status": "success", "content": "working..."},
+            ]
+            mock_parse.side_effect = [("done", None), ("working", None)]
+            mock_clear.return_value = {"status": "success"}
+            mock_send.return_value = {"status": "success"}
+
+            result = await send_command("$1", "run tests")
+
+        assert result["status"] == "success"
+        mock_clear.assert_called_once_with("$1", None)
+
 
 class TestSpawnAgent:
     """Tests for spawn_agent() MCP tool — launching agents in tmux sessions."""

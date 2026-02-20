@@ -501,9 +501,11 @@ async def send_command(
             }
 
     # Step 7: Clear partial input, then send command
-    clear_result = await clear_pane_input(session_id, pane_id)
-    if clear_result["status"] != "success":
-        return clear_result
+    # Skip Ctrl+C clear for interactive dialog states — it would dismiss the prompt
+    if agent_state == "done":
+        clear_result = await clear_pane_input(session_id, pane_id)
+        if clear_result["status"] != "success":
+            return clear_result
 
     send_result = await send_keys_to_pane(session_id, command, pane_id)
     if send_result["status"] != "success":

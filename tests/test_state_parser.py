@@ -209,6 +209,31 @@ class TestUnknownState:
         assert data is None
 
 
+@pytest.fixture
+def idle_pane():
+    return (FIXTURES / "idle.txt").read_text()
+
+
+class TestIdlePromptState:
+    """Tests for Claude Code idle prompt (❯ with ─── but no options)."""
+
+    def test_idle_claude_prompt_is_done(self, idle_pane):
+        """Verify the idle Claude Code prompt is classified as done, not ask_user."""
+        state, data = parse(idle_pane)
+        assert state == "done"
+
+    def test_idle_claude_prompt_not_ask_user(self, idle_pane):
+        """Verify idle prompt with ❯ and ─── but no options does NOT classify as ask_user."""
+        state, _ = parse(idle_pane)
+        assert state != "ask_user"
+
+    def test_arrow_with_separator_but_no_options_is_done(self):
+        """Verify ❯ + ─── without numbered options falls through to done."""
+        content = "───────────────────\n❯\n───────────────────\n"
+        state, _ = parse(content)
+        assert state == "done"
+
+
 class TestStatePriority:
     """Tests for priority ordering when multiple patterns could match."""
 

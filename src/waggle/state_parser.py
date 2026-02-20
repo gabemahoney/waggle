@@ -30,9 +30,11 @@ def parse(content: str) -> tuple[str, dict | None]:
     if "Do you want to proceed?" in content and "Permission rule" in content:
         return "check_permission", _parse_check_permission(content)
 
-    # 2. ask_user — requires BOTH ❯ and ─── to avoid false positives
+    # 2. ask_user — requires BOTH ❯ and ─── AND parsed options to avoid false positives
     if "\u276f" in content and "\u2500\u2500\u2500" in content:
-        return "ask_user", _parse_ask_user(content)
+        data = _parse_ask_user(content)
+        if data["options"]:
+            return "ask_user", data
 
     # 3. working
     if "Esc to interrupt" in content:
@@ -47,15 +49,22 @@ def parse(content: str) -> tuple[str, dict | None]:
 
 
 def _is_done(content: str) -> bool:
-    """Check if content ends with a standalone > prompt.
+    """Check if content shows the agent is at an idle prompt.
 
-    The last non-empty line must match ^>\\s*$ exactly — just the prompt
-    character optionally followed by whitespace. Lines like "> some text"
-    or "code > output" must NOT match.
+    Two patterns qualify:
+    - A standalone ❯ on any line (Claude Code idle input box).
+    - A standalone > as the last non-empty line (classic shell prompt).
     """
     # Strip ANSI escape codes before checking
     clean = re.sub(r"\x1b\[[0-9;]*m", "", content)
     lines = clean.split("\n")
+
+    # ❯ alone on any line → Claude Code idle prompt
+    for line in lines:
+        if line.strip() == "\u276f":
+            return True
+
+    # > alone as the last non-empty line → shell-style done prompt
     for line in reversed(lines):
         stripped = line.strip()
         if stripped:
