@@ -1,11 +1,11 @@
 # Waggle
 
-MCP server for tracking async agent state in tmux sessions.
+MCP server for tracking and managing async agent state in tmux sessions.
 
 ## Overview
 
-Waggle enables LLM orchestrators to monitor the state of any Claude and OpenCode LLM sessions running inside tmux. 
-Uses hook-driven state updates to track whether agents are working or waiting for input.
+Waggle enables LLM orchestrators to monitor and control Claude and OpenCode LLM sessions running inside tmux.
+Uses hook-driven state updates to track whether agents are working or waiting for input, and provides tools to spawn, interact with, and close sessions.
 
 ## Installation
 
@@ -137,7 +137,7 @@ The plugin is automatically loaded at startup - no additional configuration requ
 
 **3. Configure State Strings**
 
-The plugin tracks two states: **idle** (waiting for input) and **working** (processing). 
+The plugin tracks two states: **idle** (waiting for input) and **working** (processing).
 You may optionally configure custom state strings via environment variables:
 
 ```bash
@@ -159,7 +159,7 @@ opencode mcp list
 
 ## How To Use It
 
-### Basic Usage ###
+### Basic Usage
 
 The MCP server will advertise its capabilities. Just ask your LLM to "list sessions" or something similar.
 For each active session it will show:
@@ -168,21 +168,172 @@ For each active session it will show:
 - directory of that agent
 - tmux session id
 
-### Advanced Usage ###
+### Advanced Usage
 
 The server also offers the ability to forcibly delete entries from the db if for some reason it ever gets into a bad state.
 
-**Architecture:**
+## MCP Tools
+
+### `list_agents`
+
+List all active agents tracked in waggle's database.
+
+**Returns:** Array of agent objects with `name`, `status`, `directory`, `session_id`, `namespace` fields.
+
+**Example:**
+```
+"List all agents" → returns list of tracked sessions with their current state
+```
+
+---
+
+### `spawn_agent`
+
+Launch a Claude or OpenCode agent in a new or existing tmux session.
+
+**Parameters:**
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `repo` | Yes | Absolute path to the repository directory |
+| `session_name` | Yes | tmux session name to create or reuse |
+| `agent` | Yes | `"claude"` or `"opencode"` |
+| `model` | No | Model name (e.g. `"sonnet"`, `"haiku"`, `"opus"`) |
+| `command` | No | Initial command to deliver after agent reaches ready state |
+| `settings` | No | Extra CLI flags (e.g. `"--dangerously-skip-permissions"`) |
+
+**Session resolution:**
+- Session doesn't exist → create new session at `repo` path
+- Session exists + LLM running → error: "LLM already running in session"
+- Session exists + no LLM + same repo → reuse existing session
+- Session exists + no LLM + different repo → error: "session exists but is in wrong repo"
+
+**Returns:** `{status, session_id, session_name, message}`
+
+**Examples:**
+```
+"Spawn a claude agent in /my/project as session 'worker-1'"
+→ creates tmux session, launches claude, registers in DB
+
+"Spawn claude sonnet in /my/project with initial command 'help me refactor auth.py'"
+→ waits up to 60s for agent to reach ready state, then delivers the command
+```
+
+---
+
+### `read_pane`
+
+Read the current content and state of an agent's tmux pane.
+
+**Parameters:**
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `session_id` | Yes | — | tmux session ID (e.g. `"$1"`) |
+| `pane_id` | No | active pane | Specific pane ID for multi-pane sessions |
+| `scrollback` | No | `50` | Number of scrollback lines to capture |
+
+**Agent states detected:**
+- `working` — agent is actively generating output ("Esc to interrupt" visible)
+- `done` — agent is idle, waiting for input (`>` prompt visible)
+- `ask_user` — agent is showing a numbered-option prompt (AskUserQuestion)
+- `check_permission` — agent is requesting permission for a tool call
+- `unknown` — content doesn't match any known pattern
+
+**Returns:** `{status, agent_state, content, prompt_data}`
+- `prompt_data` is populated for `ask_user` (question + options) and `check_permission` (tool type + command) states
+
+**Examples:**
+```
+"Read the pane for session $2"
+→ {status: "success", agent_state: "done", content: "...", prompt_data: null}
+
+"Check if agent in session $3 is waiting for input"
+→ use read_pane and inspect agent_state
+```
+
+---
+
+### `send_command`
+
+Send a command or response to an agent's tmux pane.
+
+**Parameters:**
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `session_id` | Yes | tmux session ID (e.g. `"$1"`) |
+| `command` | Yes | Text to send (freeform, or option number for prompts) |
+| `pane_id` | No | Specific pane ID for multi-pane sessions |
+
+**State-aware behavior:**
+- `working` state → rejected with `"agent is busy"`
+- `unknown` state → rejected with `"agent state unknown, cannot safely send"`
+- `done` state → `command` sent as-is
+- `ask_user` state → `command` must be a valid option number (e.g. `"1"`, `"2"`)
+- `check_permission` state → `command` must be `"1"` (yes) or `"2"` (no)
+
+Sends `Ctrl+C` first to clear any partial input, then sends the command + Enter.
+Polls up to 5 seconds for a state transition to confirm delivery.
+
+**Returns:** `{status, message}`
+
+**Examples:**
+```
+"Send 'run the tests' to session $2 (agent must be in done state)"
+
+"Agent in $3 is showing an AskUserQuestion prompt with options 1-3, send option '2'"
+→ send_command(session_id="$3", command="2")
+
+"Approve the permission request in session $4"
+→ send_command(session_id="$4", command="1")
+```
+
+---
+
+### `close_session`
+
+Terminate a waggle-managed tmux session and remove its DB entry.
+
+**Parameters:**
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `session_id` | Yes | — | tmux session ID (e.g. `"$1"`) |
+| `session_name` | No | `None` | Name to validate (prevents closing wrong session if IDs recycled) |
+| `force` | No | `false` | Required to close a session with an active LLM agent |
+
+**LLM protection:** If an LLM is actively running and `force=false`, returns an error asking you to retry with `force=true`.
+
+**Returns:** `{status, message}`
+
+**Examples:**
+```
+"Close session $2"
+→ removes DB entry and kills tmux session
+
+"Force close session $3 even though claude is running"
+→ close_session(session_id="$3", force=true)
+```
+
+---
+
+### `delete_repo_agents`
+
+Remove all waggle DB entries for a specific repository path. Use to clean up stale or corrupted state.
+
+**Returns:** `{status, deleted_count}`
+
+---
+
+## Architecture
 
 Waggle has 4 components:
 
-1. **MCP Server** - Provides `list_agents`, `delete_repo_agents`, `close_session`, `read_pane` tools
-2. **SQLite Database** - Persistent agent state tracking with session identity keys
-3. **tmux Sessions** - Isolated environments for async agents
-4. **State Tracking Integration** - Auto-update database on agent state changes
+1. **MCP Server** (`src/waggle/server.py`) — Provides 6 tools: `list_agents`, `spawn_agent`, `read_pane`, `send_command`, `close_session`, `delete_repo_agents`
+2. **SQLite Database** — Persistent agent state tracking with session identity keys (`session_name+session_id+session_created`)
+3. **tmux Sessions** (`src/waggle/tmux.py`) — libtmux wrappers for session management, agent launch, pane interaction
+4. **State Tracking Integration** — Auto-update database on agent state changes
    - **Claude Code**: Bash hooks called on session lifecycle events
    - **OpenCode**: TypeScript plugin responds to session events
 
+**State detection** (`src/waggle/state_parser.py`) — Parses raw pane content to classify agent state (working / done / ask_user / check_permission / unknown).
 
 ## Advanced Configuration
 
