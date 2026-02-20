@@ -10,9 +10,10 @@ Uses hook-driven state updates to track whether agents are working or waiting fo
 ## Installation
 
 **Dependencies:**
-- tmux
+- tmux 3.2a+
 - sqlite3
 - python3
+- libtmux (installed automatically via poetry)
 
 **Install Waggle:**
 
@@ -175,7 +176,7 @@ The server also offers the ability to forcibly delete entries from the db if for
 
 Waggle has 4 components:
 
-1. **MCP Server** - Provides `list_agents`, `delete_repo_agents` tools
+1. **MCP Server** - Provides `list_agents`, `delete_repo_agents`, `close_session` tools
 2. **SQLite Database** - Persistent agent state tracking with session identity keys
 3. **tmux Sessions** - Isolated environments for async agents
 4. **State Tracking Integration** - Auto-update database on agent state changes

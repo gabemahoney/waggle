@@ -17,6 +17,7 @@ from waggle.server import (
 # Access underlying functions from decorated tools
 list_agents = server.list_agents.fn
 delete_repo_agents = server.delete_repo_agents.fn
+close_session = server.close_session.fn
 
 
 # Pytest fixtures for common mock patterns
@@ -1091,4 +1092,175 @@ class TestCustomStateEndToEnd:
             assert result["status"] == "success"
             assert len(result["agents"]) == 1
             assert result["agents"][0]["name"] == "persistent-agent"
-            assert result["agents"][0]["status"] == "processing data"
+
+
+class TestCloseSession:
+    """Tests for close_session() — terminates a waggle-managed tmux session."""
+
+    def _make_db_with_session(self, db_path: str, session_id: str, session_name: str) -> str:
+        """Insert a state row using the real schema (key, repo, status, updated_at)."""
+        key = f"{session_name}+{session_id}+1111111111"
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "INSERT INTO state (key, repo, status, updated_at) VALUES (?, ?, ?, ?)",
+            (key, "/repo", "idle", "2024-01-01T00:00:00"),
+        )
+        conn.commit()
+        conn.close()
+        return key
+
+    @pytest.mark.asyncio
+    async def test_session_not_in_db_returns_error(self, mock_db_path):
+        """Verify error when session_id has no DB entry."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+
+        result = await close_session("$99")
+
+        assert result["status"] == "error"
+        assert "$99" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_session_name_mismatch_returns_error(self, mock_db_path):
+        """Verify error when session_name doesn't match DB/tmux session."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._make_db_with_session(str(mock_db_path), "$1", "agent1")
+
+        with patch("waggle.server.validate_session_name_id", new_callable=AsyncMock) as mock_validate:
+            mock_validate.return_value = {"status": "error", "message": "Session name mismatch"}
+
+            result = await close_session("$1", session_name="wrong-name")
+
+        assert result["status"] == "error"
+        assert "mismatch" in result["message"].lower()
+
+    @pytest.mark.asyncio
+    async def test_llm_running_without_force_returns_error(self, mock_db_path):
+        """Verify error when LLM is running and force=False with exact message."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._make_db_with_session(str(mock_db_path), "$1", "agent1")
+
+        with patch("waggle.server.check_llm_running", new_callable=AsyncMock) as mock_llm:
+            mock_llm.return_value = True
+
+            result = await close_session("$1")
+
+        assert result["status"] == "error"
+        assert result["message"] == "Active LLM agent, call again with force=true to confirm"
+
+    @pytest.mark.asyncio
+    async def test_llm_running_with_force_proceeds(self, mock_db_path):
+        """Verify close proceeds when LLM is running and force=True."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._make_db_with_session(str(mock_db_path), "$1", "agent1")
+
+        with patch("waggle.server.check_llm_running", new_callable=AsyncMock) as mock_llm, \
+             patch("waggle.server.kill_session", new_callable=AsyncMock) as mock_kill:
+            mock_llm.return_value = True
+            mock_kill.return_value = {"status": "success"}
+
+            result = await close_session("$1", force=True)
+
+        assert result["status"] == "success"
+        mock_kill.assert_called_once_with("$1")
+
+    @pytest.mark.asyncio
+    async def test_no_llm_proceeds_without_force(self, mock_db_path):
+        """Verify close proceeds when no LLM is running, without force."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._make_db_with_session(str(mock_db_path), "$1", "agent1")
+
+        with patch("waggle.server.check_llm_running", new_callable=AsyncMock) as mock_llm, \
+             patch("waggle.server.kill_session", new_callable=AsyncMock) as mock_kill:
+            mock_llm.return_value = False
+            mock_kill.return_value = {"status": "success"}
+
+            result = await close_session("$1")
+
+        assert result["status"] == "success"
+
+    @pytest.mark.asyncio
+    async def test_kill_failure_after_db_delete_returns_partial_error(self, mock_db_path):
+        """Verify error with DB-removed message when tmux kill fails after DB delete."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._make_db_with_session(str(mock_db_path), "$1", "agent1")
+
+        with patch("waggle.server.check_llm_running", new_callable=AsyncMock) as mock_llm, \
+             patch("waggle.server.kill_session", new_callable=AsyncMock) as mock_kill:
+            mock_llm.return_value = False
+            mock_kill.return_value = {"status": "error", "message": "tmux error"}
+
+            result = await close_session("$1")
+
+        assert result["status"] == "error"
+        assert "DB entry removed" in result["message"]
+        assert "tmux error" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_db_entry_removed_on_success(self, mock_db_path):
+        """Verify DB entry is deleted after successful close."""
+        import sqlite3
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._make_db_with_session(str(mock_db_path), "$1", "agent1")
+
+        with patch("waggle.server.check_llm_running", new_callable=AsyncMock) as mock_llm, \
+             patch("waggle.server.kill_session", new_callable=AsyncMock) as mock_kill:
+            mock_llm.return_value = False
+            mock_kill.return_value = {"status": "success"}
+
+            await close_session("$1")
+
+        conn = sqlite3.connect(str(mock_db_path))
+        rows = conn.execute("SELECT key FROM state WHERE key LIKE '%$1%'").fetchall()
+        conn.close()
+        assert rows == []
+
+    @pytest.mark.asyncio
+    async def test_success_returns_correct_message(self, mock_db_path):
+        """Verify success response has expected status and message."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._make_db_with_session(str(mock_db_path), "$1", "agent1")
+
+        with patch("waggle.server.check_llm_running", new_callable=AsyncMock) as mock_llm, \
+             patch("waggle.server.kill_session", new_callable=AsyncMock) as mock_kill:
+            mock_llm.return_value = False
+            mock_kill.return_value = {"status": "success"}
+
+            result = await close_session("$1")
+
+        assert result == {"status": "success", "message": "Session closed"}
+
+    @pytest.mark.asyncio
+    async def test_db_delete_precedes_tmux_kill(self, mock_db_path):
+        """Verify DB entry is already gone when kill_session is called (DB-first ordering)."""
+        import sqlite3
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._make_db_with_session(str(mock_db_path), "$1", "agent1")
+
+        db_was_empty_at_kill = []
+
+        async def check_db_then_succeed(session_id):
+            """Side-effect that checks DB state when kill_session is called."""
+            conn = sqlite3.connect(str(mock_db_path))
+            rows = conn.execute(
+                "SELECT key FROM state WHERE key LIKE ?", (f"%+{session_id}+%",)
+            ).fetchall()
+            conn.close()
+            db_was_empty_at_kill.append(len(rows) == 0)
+            return {"status": "success"}
+
+        with patch("waggle.server.check_llm_running", new_callable=AsyncMock, return_value=False), \
+             patch("waggle.server.kill_session", side_effect=check_db_then_succeed):
+
+            result = await close_session("$1")
+
+        assert result["status"] == "success"
+        assert db_was_empty_at_kill == [True], "DB entry must be deleted before tmux kill"

@@ -12,7 +12,13 @@ from mcp.shared.exceptions import McpError
 
 from waggle.config import get_db_path
 from waggle.database import init_schema, connection
-from waggle.tmux import get_sessions, get_active_session_keys
+from waggle.tmux import (
+    get_sessions,
+    get_active_session_keys,
+    kill_session,
+    validate_session_name_id,
+    check_llm_running,
+)
 
 # Initialize FastMCP instance
 mcp = FastMCP("waggle-async-agents")
@@ -269,6 +275,87 @@ async def delete_repo_agents(
             "status": "error",
             "error": f"Failed to clean up database: {str(e)}"
         }
+
+
+@mcp.tool()
+async def close_session(
+    session_id: str,
+    session_name: str | None = None,
+    force: bool = False,
+) -> dict:
+    """Close an agent tmux session and remove its database entry.
+
+    Terminates a tmux session managed by waggle. DB entry is removed first;
+    if the tmux kill subsequently fails, the error is reported but the DB
+    entry is already gone.
+
+    Args:
+        session_id: The tmux session ID (e.g. "$1"). Required.
+        session_name: Optional name to validate against — prevents closing the
+            wrong session if IDs have been recycled.
+        force: If True, close even if an LLM agent is actively running.
+
+    Returns:
+        {"status": "success", "message": "Session closed"} or
+        {"status": "error", "message": ...}
+    """
+    db_path = get_db_path()
+
+    # Step 1: Validate session_id exists in DB
+    try:
+        with connection(db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT key FROM state WHERE key LIKE ?",
+                (f"%+{session_id}+%",),
+            )
+            rows = cursor.fetchall()
+            matching_key = rows[0][0] if rows else None
+    except Exception as e:
+        return {"status": "error", "message": f"Failed to query database: {str(e)}"}
+
+    if matching_key is None:
+        return {"status": "error", "message": f"Session '{session_id}' not found in database"}
+
+    # Step 2: Validate session_name if provided
+    if session_name is not None:
+        result = await validate_session_name_id(session_id, session_name)
+        if result["status"] != "success":
+            return result
+
+    # Step 3: Check if LLM is running
+    llm_running = await check_llm_running(session_id)
+
+    # Steps 4–5: Enforce force flag
+    if llm_running and not force:
+        return {
+            "status": "error",
+            "message": "Active LLM agent, call again with force=true to confirm",
+        }
+
+    # Step 6: DB-first delete
+    try:
+        with connection(db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM state WHERE key = ?", (matching_key,))
+    except Exception as e:
+        return {"status": "error", "message": f"Failed to delete database entry: {str(e)}"}
+
+    # Step 7: Kill the tmux session
+    kill_result = await kill_session(session_id)
+
+    # Step 8: Report partial failure if kill failed
+    if kill_result["status"] != "success":
+        return {
+            "status": "error",
+            "message": (
+                f"DB entry removed but tmux session kill failed: "
+                f"{kill_result.get('message', 'unknown error')}"
+            ),
+        }
+
+    # Step 9: Success
+    return {"status": "success", "message": "Session closed"}
 
 
 def cleanup_dead_sessions():

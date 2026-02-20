@@ -12,6 +12,12 @@ from waggle.tmux import (
     is_llm_running,
     get_sessions_async,
     get_active_session_keys_async,
+    _kill_session_sync,
+    kill_session,
+    _validate_session_name_id_sync,
+    validate_session_name_id,
+    _check_llm_running_sync,
+    check_llm_running,
 )
 
 
@@ -202,3 +208,214 @@ class TestAsyncWrappers:
 
         mock_get_keys.assert_called_once()
         assert result == expected
+
+
+class TestKillSessionSync:
+    """Tests for _kill_session_sync() — sync dict-return kill via libtmux."""
+
+    @patch("waggle.tmux.libtmux.Server")
+    def test_success(self, mock_server_cls):
+        """Verify returns {"status": "success"} when session is killed."""
+        mock_server = MagicMock()
+        mock_session = MagicMock()
+        mock_server.sessions.get.return_value = mock_session
+        mock_server_cls.return_value = mock_server
+
+        result = _kill_session_sync("$3")
+
+        mock_server.sessions.get.assert_called_once_with(session_id="$3")
+        mock_session.kill.assert_called_once()
+        assert result == {"status": "success"}
+
+    @patch("waggle.tmux.libtmux.Server")
+    def test_session_not_found_returns_error(self, mock_server_cls):
+        """Verify returns error dict when QueryList.get() raises Exception."""
+        mock_server = MagicMock()
+        mock_server.sessions.get.side_effect = Exception("session not found")
+        mock_server_cls.return_value = mock_server
+
+        result = _kill_session_sync("$99")
+
+        assert result["status"] == "error"
+        assert "session not found" in result["message"]
+
+    @patch("waggle.tmux.libtmux.Server")
+    def test_kill_failure_returns_error(self, mock_server_cls):
+        """Verify returns error dict when session.kill() raises LibTmuxException."""
+        mock_server = MagicMock()
+        mock_session = MagicMock()
+        mock_session.kill.side_effect = LibTmuxException("kill failed")
+        mock_server.sessions.get.return_value = mock_session
+        mock_server_cls.return_value = mock_server
+
+        result = _kill_session_sync("$3")
+
+        assert result["status"] == "error"
+        assert "kill failed" in result["message"]
+
+    @patch("waggle.tmux.libtmux.Server")
+    def test_tmux_unavailable_returns_error(self, mock_server_cls):
+        """Verify returns error dict when tmux server is unavailable."""
+        mock_server_cls.side_effect = Exception("no server running")
+
+        result = _kill_session_sync("$3")
+
+        assert result["status"] == "error"
+        assert "no server running" in result["message"]
+
+
+class TestKillSessionAsync:
+    """Tests for kill_session() — async wrapper delegating to _kill_session_sync."""
+
+    @pytest.mark.asyncio
+    @patch("waggle.tmux._kill_session_sync")
+    async def test_delegates_to_sync(self, mock_sync):
+        """Verify kill_session delegates to _kill_session_sync and returns its result."""
+        mock_sync.return_value = {"status": "success"}
+
+        result = await kill_session("$3")
+
+        mock_sync.assert_called_once_with("$3")
+        assert result == {"status": "success"}
+
+    @pytest.mark.asyncio
+    @patch("waggle.tmux._kill_session_sync")
+    async def test_returns_error_from_sync(self, mock_sync):
+        """Verify kill_session passes through error dict from _kill_session_sync."""
+        mock_sync.return_value = {"status": "error", "message": "kill failed"}
+
+        result = await kill_session("$99")
+
+        assert result == {"status": "error", "message": "kill failed"}
+
+
+class TestValidateSessionNameIdSync:
+    """Tests for _validate_session_name_id_sync() — sync dict-return name validation."""
+
+    @patch("waggle.tmux.libtmux.Server")
+    def test_success(self, mock_server_cls):
+        """Verify returns {"status": "success"} when session is found and name matches."""
+        mock_server = MagicMock()
+        mock_session = MagicMock()
+        mock_session.session_name = "agent1"
+        mock_server.sessions.get.return_value = mock_session
+        mock_server_cls.return_value = mock_server
+
+        result = _validate_session_name_id_sync("$0", "agent1")
+
+        assert result == {"status": "success"}
+
+    @patch("waggle.tmux.libtmux.Server")
+    def test_name_mismatch_returns_error(self, mock_server_cls):
+        """Verify returns error dict with mismatch message when names differ."""
+        mock_server = MagicMock()
+        mock_session = MagicMock()
+        mock_session.session_name = "other-agent"
+        mock_server.sessions.get.return_value = mock_session
+        mock_server_cls.return_value = mock_server
+
+        result = _validate_session_name_id_sync("$0", "agent1")
+
+        assert result["status"] == "error"
+        assert "mismatch" in result["message"].lower()
+        assert "agent1" in result["message"]
+        assert "other-agent" in result["message"]
+
+    @patch("waggle.tmux.libtmux.Server")
+    def test_session_not_found_libtmux_exception(self, mock_server_cls):
+        """Verify returns error dict on LibTmuxException."""
+        mock_server = MagicMock()
+        mock_server.sessions.get.side_effect = LibTmuxException("no session")
+        mock_server_cls.return_value = mock_server
+
+        result = _validate_session_name_id_sync("$99", "agent1")
+
+        assert result["status"] == "error"
+        assert result["message"]
+
+    @patch("waggle.tmux.libtmux.Server")
+    def test_session_not_found_generic_exception(self, mock_server_cls):
+        """Verify returns error dict on generic Exception."""
+        mock_server = MagicMock()
+        mock_server.sessions.get.side_effect = Exception("QueryList error")
+        mock_server_cls.return_value = mock_server
+
+        result = _validate_session_name_id_sync("$99", "agent1")
+
+        assert result["status"] == "error"
+        assert result["message"]
+
+
+class TestValidateSessionNameIdAsync:
+    """Tests for validate_session_name_id() — async wrapper."""
+
+    @pytest.mark.asyncio
+    @patch("waggle.tmux._validate_session_name_id_sync")
+    async def test_delegates_to_sync(self, mock_sync):
+        """Verify validate_session_name_id delegates to _validate_session_name_id_sync."""
+        mock_sync.return_value = {"status": "success"}
+
+        result = await validate_session_name_id("$0", "agent1")
+
+        mock_sync.assert_called_once_with("$0", "agent1")
+        assert result == {"status": "success"}
+
+
+class TestCheckLlmRunningSync:
+    """Tests for _check_llm_running_sync() — sync LLM detection via active pane."""
+
+    @patch("waggle.tmux.libtmux.Server")
+    def test_returns_true_when_llm_running(self, mock_server_cls):
+        """Verify returns True when active pane is running claude."""
+        mock_server = MagicMock()
+        mock_session = MagicMock()
+        mock_pane = MagicMock()
+        mock_pane.pane_current_command = "claude"
+        mock_session.active_window.active_pane = mock_pane
+        mock_server.sessions.get.return_value = mock_session
+        mock_server_cls.return_value = mock_server
+
+        result = _check_llm_running_sync("$0")
+
+        assert result is True
+
+    @patch("waggle.tmux.libtmux.Server")
+    def test_returns_false_when_not_llm(self, mock_server_cls):
+        """Verify returns False when active pane is running zsh."""
+        mock_server = MagicMock()
+        mock_session = MagicMock()
+        mock_pane = MagicMock()
+        mock_pane.pane_current_command = "zsh"
+        mock_session.active_window.active_pane = mock_pane
+        mock_server.sessions.get.return_value = mock_session
+        mock_server_cls.return_value = mock_server
+
+        result = _check_llm_running_sync("$0")
+
+        assert result is False
+
+    @patch("waggle.tmux.libtmux.Server")
+    def test_returns_false_on_exception(self, mock_server_cls):
+        """Verify returns False when session lookup raises."""
+        mock_server = MagicMock()
+        mock_server.sessions.get.side_effect = Exception("no session")
+        mock_server_cls.return_value = mock_server
+
+        result = _check_llm_running_sync("$99")
+
+        assert result is False
+
+
+class TestCheckLlmRunningAsync:
+    """Tests for check_llm_running() — async wrapper."""
+
+    @pytest.mark.asyncio
+    @patch("waggle.tmux._check_llm_running_sync")
+    async def test_delegates_to_sync(self, mock_sync):
+        """Verify check_llm_running delegates to _check_llm_running_sync."""
+        mock_sync.return_value = True
+
+        result = await check_llm_running("$0")
+
+        mock_sync.assert_called_once_with("$0")
+        assert result is True

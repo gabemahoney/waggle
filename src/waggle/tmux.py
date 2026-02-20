@@ -84,3 +84,81 @@ async def get_sessions_async() -> list[dict]:
 async def get_active_session_keys_async() -> set[str]:
     """Async wrapper for get_active_session_keys()."""
     return await asyncio.to_thread(get_active_session_keys)
+
+
+def _kill_session_sync(session_id: str) -> dict:
+    try:
+        server = libtmux.Server()
+        session = server.sessions.get(session_id=session_id)
+        session.kill()
+        return {"status": "success"}
+    except LibTmuxException as e:
+        return {"status": "error", "message": str(e)}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+async def kill_session(session_id: str) -> dict:
+    """Kill a tmux session by session ID.
+
+    Args:
+        session_id: The tmux session ID (e.g. "$1").
+
+    Returns:
+        {"status": "success"} or {"status": "error", "message": ...}
+    """
+    return await asyncio.to_thread(_kill_session_sync, session_id)
+
+
+def _validate_session_name_id_sync(session_id: str, session_name: str) -> dict:
+    try:
+        server = libtmux.Server()
+        session = server.sessions.get(session_id=session_id)
+        if session.session_name == session_name:
+            return {"status": "success"}
+        return {
+            "status": "error",
+            "message": (
+                f"Session name mismatch: expected '{session_name}', "
+                f"found '{session.session_name}'"
+            ),
+        }
+    except LibTmuxException as e:
+        return {"status": "error", "message": str(e)}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+async def validate_session_name_id(session_id: str, session_name: str) -> dict:
+    """Validate that a tmux session ID maps to the expected session name.
+
+    Args:
+        session_id: The tmux session ID (e.g. "$1").
+        session_name: The expected session name.
+
+    Returns:
+        {"status": "success"} or {"status": "error", "message": ...}
+    """
+    return await asyncio.to_thread(_validate_session_name_id_sync, session_id, session_name)
+
+
+def _check_llm_running_sync(session_id: str) -> bool:
+    try:
+        server = libtmux.Server()
+        session = server.sessions.get(session_id=session_id)
+        pane = session.active_window.active_pane
+        return is_llm_running(pane)
+    except (LibTmuxException, Exception):
+        return False
+
+
+async def check_llm_running(session_id: str) -> bool:
+    """Check if the active pane of a tmux session is running an LLM.
+
+    Args:
+        session_id: The tmux session ID (e.g. "$1").
+
+    Returns:
+        True if an LLM agent is running, False otherwise or on error.
+    """
+    return await asyncio.to_thread(_check_llm_running_sync, session_id)
