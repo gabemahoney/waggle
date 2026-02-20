@@ -9,6 +9,7 @@ packages = [{include = "waggle", from = "src"}]
 [tool.poetry.dependencies]
 python = "^3.10"
 fastmcp = "^2.14.5"
+libtmux = "^0.53"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.2"

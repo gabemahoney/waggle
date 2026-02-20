@@ -3,7 +3,6 @@
 Provides FastMCP server initialization with database integration.
 """
 
-import subprocess
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse, unquote
@@ -13,20 +12,7 @@ from mcp.shared.exceptions import McpError
 
 from waggle.config import get_db_path
 from waggle.database import init_schema, connection
-
-# Delimiter for tmux format string output. Tab is used instead of colon
-# because tmux session names can contain colons, which would break parsing.
-TMUX_FIELD_SEP = "\t"
-
-# tmux format strings for list-sessions queries
-# 4-field variant: used by list_agents (includes session_path)
-TMUX_FMT_WITH_PATH = TMUX_FIELD_SEP.join([
-    "#{session_name}", "#{session_id}", "#{session_created}", "#{session_path}"
-])
-# 3-field variant: used by cleanup_dead_sessions (no path needed)
-TMUX_FMT_KEYS_ONLY = TMUX_FIELD_SEP.join([
-    "#{session_name}", "#{session_id}", "#{session_created}"
-])
+from waggle.tmux import get_sessions, get_active_session_keys
 
 # Initialize FastMCP instance
 mcp = FastMCP("waggle-async-agents")
@@ -214,43 +200,17 @@ async def list_agents(
             "error": f"Failed to query database: {str(e)}"
         }
     
-    # Enrich with tmux session info (session_path) if session is still alive
-    try:
-        result = subprocess.run(
-            ["tmux", "list-sessions", "-F", TMUX_FMT_WITH_PATH],
-            capture_output=True,
-            text=True,
-            check=True,
-            timeout=5
-        )
-        
-        # Parse tmux output into lookup map
-        tmux_sessions = {}
-        for line in result.stdout.strip().split('\n'):
-            if not line:
-                continue
-            parts = line.split(TMUX_FIELD_SEP, 3)
-            if len(parts) >= 4:
-                t_name, t_id, t_created, t_path = parts[0], parts[1], parts[2], parts[3]
-                # Build composite key matching DB format
-                composite_key = f"{t_name}+{t_id}+{t_created}"
-                tmux_sessions[composite_key] = t_path
-        
-        # Enrich agents with tmux session_path
-        for agent in agents:
-            composite_key = f"{agent['name']}+{agent['session_id']}+{agent['session_created']}"
-            if composite_key in tmux_sessions:
-                agent["directory"] = tmux_sessions[composite_key]
-                
-    except subprocess.TimeoutExpired:
-        # Non-fatal: agents exist in DB but we couldn't enrich with tmux data
-        pass
-    except subprocess.CalledProcessError:
-        # Non-fatal: tmux might have no sessions, DB agents still valid
-        pass
-    except FileNotFoundError:
-        # Non-fatal: tmux not installed, but DB agents still exist
-        pass
+    # Enrich with tmux session paths (non-fatal — get_sessions returns [] on error)
+    tmux_session_list = get_sessions()
+    tmux_sessions = {}
+    for s in tmux_session_list:
+        composite_key = f"{s['session_name']}+{s['session_id']}+{s['session_created']}"
+        tmux_sessions[composite_key] = s["session_path"]
+
+    for agent in agents:
+        composite_key = f"{agent['name']}+{agent['session_id']}+{agent['session_created']}"
+        if composite_key in tmux_sessions:
+            agent["directory"] = tmux_sessions[composite_key]
     
     return {
         "status": "success",
@@ -313,59 +273,36 @@ async def delete_repo_agents(
 
 def cleanup_dead_sessions():
     """Remove database entries for dead tmux sessions.
-    
-    Queries tmux for active sessions and removes database entries for sessions
-    that no longer exist. Can be called synchronously (cleanup happens in-place).
-    Silently handles all errors - never raises exceptions.
+
+    Queries tmux via libtmux for active sessions and removes database entries
+    for sessions that no longer exist. Silently handles all errors.
     """
     try:
-        # Get active tmux sessions
-        result = subprocess.run(
-            ["tmux", "list-sessions", "-F", TMUX_FMT_KEYS_ONLY],
-            capture_output=True,
-            text=True,
-            timeout=2
-        )
-        
-        # If tmux fails (no server, no sessions, etc), skip cleanup
-        if result.returncode != 0:
+        active_sessions = get_active_session_keys()
+
+        # If no active sessions, skip cleanup — could mean tmux is unavailable
+        # rather than truly zero sessions. Avoids wiping all DB entries on
+        # transient tmux failures (matches old returncode != 0 early return).
+        if not active_sessions:
             return
-        
-        # Parse active sessions into set of composite keys
-        active_sessions = set()
-        for line in result.stdout.strip().split('\n'):
-            if line:
-                parts = line.split(TMUX_FIELD_SEP, 2)
-                if len(parts) >= 3:
-                    name, session_id, session_created = parts[0], parts[1], parts[2]
-                    composite_key = f"{name}+{session_id}+{session_created}"
-                    active_sessions.add(composite_key)
-        
+
         # Query database and delete orphaned entries
         db_path = get_db_path()
         with connection(db_path) as conn:
             cursor = conn.cursor()
-            
-            # Get all state entries
             cursor.execute("SELECT key FROM state")
             all_keys = cursor.fetchall()
-            
-            # Find orphaned entries
+
             orphaned_keys = []
             for (key,) in all_keys:
-                # Key format: name+session_id+session_created (no namespace prefix)
                 if key not in active_sessions:
-                    # Session is dead, collect for batch deletion
                     orphaned_keys.append(key)
-            
-            # Batch delete all orphaned entries in a single statement
+
             if orphaned_keys:
                 placeholders = ','.join(['?'] * len(orphaned_keys))
-                # Note: f-string is used only for placeholder generation (?), not data interpolation
                 cursor.execute(f"DELETE FROM state WHERE key IN ({placeholders})", orphaned_keys)
-            
+
     except Exception:
-        # Silent failure - all errors ignored
         pass
 
 
