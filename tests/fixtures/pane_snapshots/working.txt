@@ -1,0 +1,26 @@
+
+● Analyzing the repository structure to understand what files need to be updated...
+
+Reading src/waggle/server.py to understand the current implementation.
+
+I can see the server.py imports from waggle.tmux — let me check the tmux module to
+understand what functions are available before making changes.
+
+The current implementation uses subprocess.run() for tmux interactions. The plan is
+to migrate all of these to libtmux for a cleaner interface.
+
+Let me start by updating the get_sessions function to use libtmux's Session objects
+instead of raw subprocess calls. This will give us proper error handling and a more
+Pythonic API.
+
+Here's the updated implementation:
+
+  ● Update(src/waggle/tmux.py)
+  ⎿  Updated src/waggle/tmux.py with 47 additions and 23 deletions
+
+● Now let me run the tests to make sure nothing is broken...
+
+  ● Bash(poetry run pytest tests/ -x -q)
+  ⎿  Running...
+
+Esc to interrupt

@@ -1,0 +1,9 @@
+All 6 acceptance criteria verified. Are you ready to mark Epic features.bees-lpw as finished?
+
+❯ 1. Yes, mark as finished
+     All acceptance criteria met. Close the Epic.
+  2. No, more work needed
+     There's additional work before this Epic can be closed.
+  3. Type something.
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  4. Chat about this
