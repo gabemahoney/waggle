@@ -950,3 +950,129 @@ class TestSetStateHook:
         assert value == malicious_state
         assert '"' in value
 
+
+class TestAgentTypeGating:
+    """Tests for CLAUDE_CODE_AGENT_TYPE gating in set_state.sh."""
+
+    def test_db_write_when_agent_type_unset(
+        self, set_state_hook, temp_home, db_path
+    ):
+        """Hook writes to DB when CLAUDE_CODE_AGENT_TYPE is unset."""
+        result = run_set_state_hook(
+            set_state_hook, "working",
+            cwd=str(temp_home),
+            env={"CLAUDE_CODE_AGENT_TYPE": ""}
+        )
+        assert result.returncode == 0
+        key = "test-session+abc123+1234567890"
+        value = get_db_value(db_path, key)
+        assert value == "working"
+
+    def test_db_write_when_agent_type_team_lead(
+        self, set_state_hook, temp_home, db_path
+    ):
+        """Hook writes to DB when CLAUDE_CODE_AGENT_TYPE is 'team-lead'."""
+        result = run_set_state_hook(
+            set_state_hook, "working",
+            cwd=str(temp_home),
+            env={"CLAUDE_CODE_AGENT_TYPE": "team-lead"}
+        )
+        assert result.returncode == 0
+        key = "test-session+abc123+1234567890"
+        value = get_db_value(db_path, key)
+        assert value == "working"
+
+    def test_no_db_write_when_agent_type_teammate(
+        self, set_state_hook, temp_home, db_path
+    ):
+        """Hook skips DB write when CLAUDE_CODE_AGENT_TYPE is 'teammate'."""
+        result = run_set_state_hook(
+            set_state_hook, "working",
+            cwd=str(temp_home),
+            env={"CLAUDE_CODE_AGENT_TYPE": "teammate"}
+        )
+        assert result.returncode == 0
+        key = "test-session+abc123+1234567890"
+        value = get_db_value(db_path, key)
+        assert value is None
+
+    def test_no_db_write_when_agent_type_other(
+        self, set_state_hook, temp_home, db_path
+    ):
+        """Hook skips DB write for any non-team-lead agent type."""
+        for agent_type in ["worker", "subagent", "assistant", "bot"]:
+            result = run_set_state_hook(
+                set_state_hook, "working",
+                cwd=str(temp_home),
+                env={"CLAUDE_CODE_AGENT_TYPE": agent_type}
+            )
+            assert result.returncode == 0
+            key = "test-session+abc123+1234567890"
+            value = get_db_value(db_path, key)
+            assert value is None, f"Expected no DB write for agent_type={agent_type!r}"
+
+    def test_db_write_when_agent_type_truly_unset(
+        self, set_state_hook, temp_home, db_path
+    ):
+        """Hook writes to DB when CLAUDE_CODE_AGENT_TYPE is not set at all (backward compat)."""
+        import tempfile as _tempfile
+        test_env = os.environ.copy()
+        test_env.pop("CLAUDE_CODE_AGENT_TYPE", None)
+
+        with _tempfile.TemporaryDirectory() as mock_dir:
+            mock_path = Path(mock_dir)
+            tmux_mock = mock_path / "tmux"
+            tmux_mock.write_text("""#!/usr/bin/env bash
+if [[ "$1" == "display-message" ]]; then
+    case "$3" in
+        '#{session_name}') echo "test-session" ;;
+        '#{session_id}') echo "abc123" ;;
+        '#{session_created}') echo "1234567890" ;;
+        *) echo "test-session" ;;
+    esac
+fi
+exit 0
+""")
+            tmux_mock.chmod(0o755)
+            test_env['PATH'] = f"{mock_dir}:{test_env.get('PATH', '')}"
+            test_env['HOME'] = str(temp_home)
+
+            result = subprocess.run(
+                ["bash", str(set_state_hook), "working"],
+                capture_output=True,
+                text=True,
+                cwd=str(temp_home),
+                env=test_env,
+            )
+
+        assert result.returncode == 0
+        key = "test-session+abc123+1234567890"
+        value = get_db_value(db_path, key)
+        assert value == "working"
+
+    def test_no_stderr_when_agent_type_teammate(
+        self, set_state_hook, temp_home
+    ):
+        """Hook produces no stderr output when CLAUDE_CODE_AGENT_TYPE is 'teammate'."""
+        result = run_set_state_hook(
+            set_state_hook, "working",
+            cwd=str(temp_home),
+            env={"CLAUDE_CODE_AGENT_TYPE": "teammate"}
+        )
+        assert result.returncode == 0
+        assert result.stderr == ""
+
+    def test_no_db_write_when_orchestrator_or_subagent(
+        self, set_state_hook, temp_home, db_path
+    ):
+        """Hook skips DB write for orchestrator and sub-agent agent types."""
+        for agent_type in ["orchestrator", "sub-agent"]:
+            result = run_set_state_hook(
+                set_state_hook, "working",
+                cwd=str(temp_home),
+                env={"CLAUDE_CODE_AGENT_TYPE": agent_type}
+            )
+            assert result.returncode == 0
+            key = "test-session+abc123+1234567890"
+            value = get_db_value(db_path, key)
+            assert value is None, f"Expected no DB write for agent_type={agent_type!r}"

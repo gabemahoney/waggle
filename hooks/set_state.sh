@@ -15,6 +15,11 @@ if [[ "$1" == "--delete" ]]; then
     DELETE_MODE=true
 fi
 
+# Gate on CLAUDE_CODE_AGENT_TYPE — skip DB write for non-team-lead agents
+if [[ -n "${CLAUDE_CODE_AGENT_TYPE}" && "${CLAUDE_CODE_AGENT_TYPE}" != "team-lead" ]]; then
+    exit 0
+fi
+
 STATE="$1"
 
 # Read database path from config with fallback
