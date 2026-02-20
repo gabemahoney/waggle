@@ -3,6 +3,7 @@
 Provides FastMCP server initialization with database integration.
 """
 
+import asyncio
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse, unquote
@@ -20,6 +21,8 @@ from waggle.tmux import (
     validate_session_name_id,
     check_llm_running,
     capture_pane,
+    send_keys_to_pane,
+    clear_pane_input,
 )
 
 # Initialize FastMCP instance
@@ -414,6 +417,108 @@ async def read_pane(
         "agent_state": agent_state,
         "content": content,
         "prompt_data": prompt_data,
+    }
+
+
+@mcp.tool()
+async def send_command(
+    session_id: str,
+    command: str,
+    pane_id: str | None = None,
+) -> dict:
+    """Send a command to an agent's tmux pane.
+
+    Validates the agent is in a receptive state before sending, optionally
+    validates option numbers for interactive prompts, then polls for a state
+    transition to confirm delivery.
+
+    Args:
+        session_id: The tmux session ID (e.g. "$1"). Required.
+        command: The command text to send to the pane.
+        pane_id: Optional pane ID. If None, uses the session's active pane.
+
+    Returns:
+        {"status": "success", "message": "command delivered"} or
+        {"status": "error", "message": str}
+    """
+    db_path = get_db_path()
+
+    # Step 1: Validate session_id in DB
+    try:
+        with connection(db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT key FROM state WHERE key LIKE ?",
+                (f"%+{session_id}+%",),
+            )
+            rows = cursor.fetchall()
+            matching_key = rows[0][0] if rows else None
+    except Exception as e:
+        return {"status": "error", "message": f"Failed to query database: {str(e)}"}
+
+    if matching_key is None:
+        return {"status": "error", "message": f"Session '{session_id}' not found in database"}
+
+    # Step 2: Read current pane state
+    capture_result = await capture_pane(session_id, pane_id)
+    if capture_result["status"] != "success":
+        return capture_result
+
+    agent_state, prompt_data = state_parser.parse(capture_result["content"])
+
+    # Step 3: Reject if working
+    if agent_state == "working":
+        return {"status": "error", "message": "agent is busy"}
+
+    # Step 4: Reject if unknown
+    if agent_state == "unknown":
+        return {"status": "error", "message": "agent state unknown, cannot safely send"}
+
+    # Step 5: Validate command for ask_user state
+    if agent_state == "ask_user":
+        if not prompt_data or not prompt_data.get("options"):
+            return {"status": "error", "message": "could not parse options from ask_user prompt"}
+        valid_numbers = {str(opt["number"]) for opt in prompt_data["options"]}
+        if command not in valid_numbers:
+            return {
+                "status": "error",
+                "message": (
+                    f"invalid option '{command}'; "
+                    f"valid options are: {', '.join(sorted(valid_numbers))}"
+                ),
+            }
+
+    # Step 6: Validate command for check_permission state
+    if agent_state == "check_permission":
+        if command not in ("1", "2"):
+            return {
+                "status": "error",
+                "message": "invalid option; must be '1' (yes) or '2' (no) for permission prompts",
+            }
+
+    # Step 7: Clear partial input, then send command
+    clear_result = await clear_pane_input(session_id, pane_id)
+    if clear_result["status"] != "success":
+        return clear_result
+
+    send_result = await send_keys_to_pane(session_id, command, pane_id)
+    if send_result["status"] != "success":
+        return send_result
+
+    # Step 8: Poll every 0.5s for up to 5s for state transition
+    for _ in range(10):
+        await asyncio.sleep(0.5)
+        poll_result = await capture_pane(session_id, pane_id)
+        if poll_result["status"] != "success":
+            continue
+        new_state, _ = state_parser.parse(poll_result["content"])
+        if new_state != agent_state:
+            return {"status": "success", "message": "command delivered"}
+
+    # Step 9: Timeout
+    return {
+        "status": "error",
+        "message": "command delivery unconfirmed: agent did not transition within 5 seconds",
     }
 
 

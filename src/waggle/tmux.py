@@ -227,3 +227,82 @@ async def validate_pane_id(session_id: str, pane_id: str) -> dict:
         {"status": "success"} or {"status": "error", "message": str}
     """
     return await asyncio.to_thread(_validate_pane_id_sync, session_id, pane_id)
+
+
+def _resolve_pane(server: libtmux.Server, session_id: str, pane_id: str | None):
+    """Resolve a pane object from session_id and optional pane_id.
+
+    Raises LibTmuxException or ValueError on failure.
+    Returns (pane, error_dict) where error_dict is None on success.
+    """
+    session = server.sessions.get(session_id=session_id)
+    if pane_id is None:
+        return session.active_window.active_pane, None
+    pane = server.panes.get(pane_id=pane_id)
+    if pane.session_id != session_id:
+        return None, {
+            "status": "error",
+            "message": f"Pane '{pane_id}' does not belong to session '{session_id}'",
+        }
+    return pane, None
+
+
+def _send_keys_to_pane_sync(session_id: str, text: str, pane_id: str | None, enter: bool) -> dict:
+    try:
+        server = libtmux.Server()
+        pane, err = _resolve_pane(server, session_id, pane_id)
+        if err:
+            return err
+        pane.send_keys(text, enter=enter)
+        return {"status": "success"}
+    except LibTmuxException as e:
+        return {"status": "error", "message": str(e)}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+async def send_keys_to_pane(
+    session_id: str,
+    text: str,
+    pane_id: str | None = None,
+    enter: bool = True,
+) -> dict:
+    """Send keys to a tmux pane.
+
+    Args:
+        session_id: The tmux session ID (e.g. "$1").
+        text: The text/keys to send.
+        pane_id: Optional pane ID. If None, uses the active pane.
+        enter: If True, sends Enter after the text.
+
+    Returns:
+        {"status": "success"} or {"status": "error", "message": str}
+    """
+    return await asyncio.to_thread(_send_keys_to_pane_sync, session_id, text, pane_id, enter)
+
+
+def _clear_pane_input_sync(session_id: str, pane_id: str | None) -> dict:
+    try:
+        server = libtmux.Server()
+        pane, err = _resolve_pane(server, session_id, pane_id)
+        if err:
+            return err
+        pane.send_keys("C-c", enter=False)
+        return {"status": "success"}
+    except LibTmuxException as e:
+        return {"status": "error", "message": str(e)}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+async def clear_pane_input(session_id: str, pane_id: str | None = None) -> dict:
+    """Send Ctrl+C to clear partial input in a tmux pane.
+
+    Args:
+        session_id: The tmux session ID (e.g. "$1").
+        pane_id: Optional pane ID. If None, uses the active pane.
+
+    Returns:
+        {"status": "success"} or {"status": "error", "message": str}
+    """
+    return await asyncio.to_thread(_clear_pane_input_sync, session_id, pane_id)

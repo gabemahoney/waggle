@@ -19,6 +19,7 @@ list_agents = server.list_agents.fn
 delete_repo_agents = server.delete_repo_agents.fn
 close_session = server.close_session.fn
 read_pane = server.read_pane.fn
+send_command = server.send_command.fn
 
 
 # Pytest fixtures for common mock patterns
@@ -1572,3 +1573,323 @@ class TestReadPane:
 
         assert result["status"] == "error"
         assert "%99" in result["message"]
+
+
+class TestSendCommand:
+    """Tests for send_command() MCP tool — sending commands to agent panes."""
+
+    def _insert_session(self, db_path: str, session_id: str, session_name: str) -> str:
+        """Insert a state row and return the key."""
+        key = f"{session_name}+{session_id}+1111111111"
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "INSERT INTO state (key, repo, status, updated_at) VALUES (?, ?, ?, ?)",
+            (key, "/repo", "waiting", "2024-01-01T00:00:00"),
+        )
+        conn.commit()
+        conn.close()
+        return key
+
+    @pytest.mark.asyncio
+    async def test_unregistered_session_returns_error(self, mock_db_path):
+        """Verify error when session_id has no DB entry."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+
+        result = await send_command("$99", "hello")
+
+        assert result["status"] == "error"
+        assert "$99" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_happy_path_done_state_delivers_command(self, mock_db_path):
+        """Verify command delivered to done-state agent, returns success."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._insert_session(str(mock_db_path), "$1", "agent1")
+
+        with patch("waggle.server.capture_pane", new_callable=AsyncMock) as mock_capture, \
+             patch("waggle.server.state_parser.parse") as mock_parse, \
+             patch("waggle.server.clear_pane_input", new_callable=AsyncMock) as mock_clear, \
+             patch("waggle.server.send_keys_to_pane", new_callable=AsyncMock) as mock_send:
+            # First capture returns done state; second capture (poll) returns different state
+            mock_capture.side_effect = [
+                {"status": "success", "content": "> "},
+                {"status": "success", "content": "working..."},
+            ]
+            mock_parse.side_effect = [("done", None), ("working", None)]
+            mock_clear.return_value = {"status": "success"}
+            mock_send.return_value = {"status": "success"}
+
+            result = await send_command("$1", "run tests")
+
+        assert result["status"] == "success"
+        assert "delivered" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_working_state_returns_busy_error(self, mock_db_path):
+        """Verify 'agent is busy' error returned when agent is in working state."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._insert_session(str(mock_db_path), "$1", "agent1")
+
+        with patch("waggle.server.capture_pane", new_callable=AsyncMock) as mock_capture, \
+             patch("waggle.server.state_parser.parse") as mock_parse:
+            mock_capture.return_value = {"status": "success", "content": "Esc to interrupt"}
+            mock_parse.return_value = ("working", None)
+
+            result = await send_command("$1", "hello")
+
+        assert result["status"] == "error"
+        assert result["message"] == "agent is busy"
+
+    @pytest.mark.asyncio
+    async def test_unknown_state_returns_safe_send_error(self, mock_db_path):
+        """Verify 'agent state unknown' error returned for unknown state."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._insert_session(str(mock_db_path), "$1", "agent1")
+
+        with patch("waggle.server.capture_pane", new_callable=AsyncMock) as mock_capture, \
+             patch("waggle.server.state_parser.parse") as mock_parse:
+            mock_capture.return_value = {"status": "success", "content": "???"}
+            mock_parse.return_value = ("unknown", None)
+
+            result = await send_command("$1", "hello")
+
+        assert result["status"] == "error"
+        assert result["message"] == "agent state unknown, cannot safely send"
+
+    @pytest.mark.asyncio
+    async def test_ask_user_valid_option_accepted(self, mock_db_path):
+        """Verify valid option number is accepted and sent for ask_user state."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._insert_session(str(mock_db_path), "$1", "agent1")
+
+        prompt_data = {
+            "question": "Choose one",
+            "options": [
+                {"number": "1", "label": "Yes"},
+                {"number": "2", "label": "No"},
+            ],
+        }
+
+        with patch("waggle.server.capture_pane", new_callable=AsyncMock) as mock_capture, \
+             patch("waggle.server.state_parser.parse") as mock_parse, \
+             patch("waggle.server.clear_pane_input", new_callable=AsyncMock) as mock_clear, \
+             patch("waggle.server.send_keys_to_pane", new_callable=AsyncMock) as mock_send:
+            mock_capture.side_effect = [
+                {"status": "success", "content": "prompt"},
+                {"status": "success", "content": "working"},
+            ]
+            mock_parse.side_effect = [("ask_user", prompt_data), ("working", None)]
+            mock_clear.return_value = {"status": "success"}
+            mock_send.return_value = {"status": "success"}
+
+            result = await send_command("$1", "1")
+
+        assert result["status"] == "success"
+
+    @pytest.mark.asyncio
+    async def test_ask_user_invalid_option_rejected(self, mock_db_path):
+        """Verify invalid option number rejected with descriptive error for ask_user state."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._insert_session(str(mock_db_path), "$1", "agent1")
+
+        prompt_data = {
+            "question": "Choose one",
+            "options": [
+                {"number": "1", "label": "Yes"},
+                {"number": "2", "label": "No"},
+            ],
+        }
+
+        with patch("waggle.server.capture_pane", new_callable=AsyncMock) as mock_capture, \
+             patch("waggle.server.state_parser.parse") as mock_parse:
+            mock_capture.return_value = {"status": "success", "content": "prompt"}
+            mock_parse.return_value = ("ask_user", prompt_data)
+
+            result = await send_command("$1", "99")
+
+        assert result["status"] == "error"
+        assert "99" in result["message"]
+        assert "invalid option" in result["message"].lower()
+
+    @pytest.mark.asyncio
+    async def test_check_permission_1_accepted(self, mock_db_path):
+        """Verify '1' is accepted as valid response for check_permission state."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._insert_session(str(mock_db_path), "$1", "agent1")
+
+        with patch("waggle.server.capture_pane", new_callable=AsyncMock) as mock_capture, \
+             patch("waggle.server.state_parser.parse") as mock_parse, \
+             patch("waggle.server.clear_pane_input", new_callable=AsyncMock) as mock_clear, \
+             patch("waggle.server.send_keys_to_pane", new_callable=AsyncMock) as mock_send:
+            mock_capture.side_effect = [
+                {"status": "success", "content": "permission prompt"},
+                {"status": "success", "content": "working"},
+            ]
+            mock_parse.side_effect = [("check_permission", {"tool_type": "Bash"}), ("working", None)]
+            mock_clear.return_value = {"status": "success"}
+            mock_send.return_value = {"status": "success"}
+
+            result = await send_command("$1", "1")
+
+        assert result["status"] == "success"
+
+    @pytest.mark.asyncio
+    async def test_check_permission_2_accepted(self, mock_db_path):
+        """Verify '2' is accepted as valid response for check_permission state."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._insert_session(str(mock_db_path), "$1", "agent1")
+
+        with patch("waggle.server.capture_pane", new_callable=AsyncMock) as mock_capture, \
+             patch("waggle.server.state_parser.parse") as mock_parse, \
+             patch("waggle.server.clear_pane_input", new_callable=AsyncMock) as mock_clear, \
+             patch("waggle.server.send_keys_to_pane", new_callable=AsyncMock) as mock_send:
+            mock_capture.side_effect = [
+                {"status": "success", "content": "permission prompt"},
+                {"status": "success", "content": "done"},
+            ]
+            mock_parse.side_effect = [("check_permission", {"tool_type": "Bash"}), ("done", None)]
+            mock_clear.return_value = {"status": "success"}
+            mock_send.return_value = {"status": "success"}
+
+            result = await send_command("$1", "2")
+
+        assert result["status"] == "success"
+
+    @pytest.mark.asyncio
+    async def test_check_permission_invalid_value_rejected(self, mock_db_path):
+        """Verify values other than '1'/'2' rejected for check_permission state."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._insert_session(str(mock_db_path), "$1", "agent1")
+
+        with patch("waggle.server.capture_pane", new_callable=AsyncMock) as mock_capture, \
+             patch("waggle.server.state_parser.parse") as mock_parse:
+            mock_capture.return_value = {"status": "success", "content": "permission prompt"}
+            mock_parse.return_value = ("check_permission", {"tool_type": "Bash"})
+
+            result = await send_command("$1", "yes")
+
+        assert result["status"] == "error"
+        assert "invalid option" in result["message"].lower()
+
+    @pytest.mark.asyncio
+    async def test_check_permission_3_rejected(self, mock_db_path):
+        """Verify '3' is rejected for check_permission state."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._insert_session(str(mock_db_path), "$1", "agent1")
+
+        with patch("waggle.server.capture_pane", new_callable=AsyncMock) as mock_capture, \
+             patch("waggle.server.state_parser.parse") as mock_parse:
+            mock_capture.return_value = {"status": "success", "content": "permission prompt"}
+            mock_parse.return_value = ("check_permission", {"tool_type": "Bash"})
+
+            result = await send_command("$1", "3")
+
+        assert result["status"] == "error"
+
+    @pytest.mark.asyncio
+    async def test_delivery_verified_via_state_transition(self, mock_db_path):
+        """Verify success returned once state transitions from initial state."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._insert_session(str(mock_db_path), "$1", "agent1")
+
+        with patch("waggle.server.capture_pane", new_callable=AsyncMock) as mock_capture, \
+             patch("waggle.server.state_parser.parse") as mock_parse, \
+             patch("waggle.server.clear_pane_input", new_callable=AsyncMock) as mock_clear, \
+             patch("waggle.server.send_keys_to_pane", new_callable=AsyncMock) as mock_send, \
+             patch("waggle.server.asyncio.sleep", new_callable=AsyncMock):
+            # Initial capture: done; then 2 polls staying same, 3rd poll transitions
+            mock_capture.side_effect = [
+                {"status": "success", "content": "> "},
+                {"status": "success", "content": "> "},
+                {"status": "success", "content": "> "},
+                {"status": "success", "content": "working..."},
+            ]
+            mock_parse.side_effect = [
+                ("done", None),
+                ("done", None),
+                ("done", None),
+                ("working", None),
+            ]
+            mock_clear.return_value = {"status": "success"}
+            mock_send.return_value = {"status": "success"}
+
+            result = await send_command("$1", "run tests")
+
+        assert result["status"] == "success"
+
+    @pytest.mark.asyncio
+    async def test_timeout_returns_error_no_retry(self, mock_db_path):
+        """Verify timeout after 5s returns error without retrying the send."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._insert_session(str(mock_db_path), "$1", "agent1")
+
+        with patch("waggle.server.capture_pane", new_callable=AsyncMock) as mock_capture, \
+             patch("waggle.server.state_parser.parse") as mock_parse, \
+             patch("waggle.server.clear_pane_input", new_callable=AsyncMock) as mock_clear, \
+             patch("waggle.server.send_keys_to_pane", new_callable=AsyncMock) as mock_send, \
+             patch("waggle.server.asyncio.sleep", new_callable=AsyncMock):
+            # All captures return same state — no transition
+            mock_capture.return_value = {"status": "success", "content": "> "}
+            mock_parse.return_value = ("done", None)
+            mock_clear.return_value = {"status": "success"}
+            mock_send.return_value = {"status": "success"}
+
+            result = await send_command("$1", "run tests")
+
+        # send_keys_to_pane called exactly once (no retry)
+        assert mock_send.call_count == 1
+        assert result["status"] == "error"
+        assert "unconfirmed" in result["message"].lower() or "timeout" in result["message"].lower() or "5 seconds" in result["message"].lower()
+
+    @pytest.mark.asyncio
+    async def test_specific_pane_id_forwarded(self, mock_db_path):
+        """Verify pane_id is forwarded to capture_pane, clear_pane_input, and send_keys_to_pane."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._insert_session(str(mock_db_path), "$1", "agent1")
+
+        with patch("waggle.server.capture_pane", new_callable=AsyncMock) as mock_capture, \
+             patch("waggle.server.state_parser.parse") as mock_parse, \
+             patch("waggle.server.clear_pane_input", new_callable=AsyncMock) as mock_clear, \
+             patch("waggle.server.send_keys_to_pane", new_callable=AsyncMock) as mock_send:
+            mock_capture.side_effect = [
+                {"status": "success", "content": "> "},
+                {"status": "success", "content": "working"},
+            ]
+            mock_parse.side_effect = [("done", None), ("working", None)]
+            mock_clear.return_value = {"status": "success"}
+            mock_send.return_value = {"status": "success"}
+
+            result = await send_command("$1", "cmd", pane_id="%5")
+
+        mock_capture.assert_any_call("$1", "%5")
+        mock_clear.assert_called_once_with("$1", "%5")
+        mock_send.assert_called_once_with("$1", "cmd", "%5")
+        assert result["status"] == "success"
+
+    @pytest.mark.asyncio
+    async def test_capture_failure_returns_error(self, mock_db_path):
+        """Verify capture_pane failure is propagated as error."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._insert_session(str(mock_db_path), "$1", "agent1")
+
+        with patch("waggle.server.capture_pane", new_callable=AsyncMock) as mock_capture:
+            mock_capture.return_value = {"status": "error", "message": "pane not found"}
+
+            result = await send_command("$1", "cmd")
+
+        assert result["status"] == "error"
+        assert "pane not found" in result["message"]

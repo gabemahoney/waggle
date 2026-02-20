@@ -6,11 +6,20 @@ labels:
 - libtmux
 - mcp-tools
 - orchestration
-status: open
+parent: null
+children:
+- t1.3dyn
+- t1.t4TG
+- t1.kN24
+- t1.vtfY
+- t1.H7tu
+- t1.PHJH
+- t1.zhHA
+- t1.5ccN
+egg: E9E02A89-B726-4B2D-AD9F-E5ABE3476C4A
 created_at: '2026-02-15T12:47:10.908940'
-updated_at: '2026-02-15T12:47:10.908942'
-bees_version: '1.1'
-priority: 1
+status: worker
+schema_version: 1.0.0
 ---
 
 ## Problem Statements
@@ -42,6 +51,16 @@ Agents also need to spawn remote sessions via tmux primitives which is not robus
 4. **Multi-pane support** - Claude Agent Teams sometimes forces multi-pane layout so solution must be capable of finding and communicating with main agent pane
 5. **Support for spawning agents** - provide cmd for establishing tmux session and spawning an agent in it
 
+### Acceptance Criteria
+
+1. `send_command`, `read_pane`, `spawn_agent`, and `close_session` MCP tools are implemented and functional
+2. `read_pane` correctly identifies all 4 agent states (Working, Done, AskUserQuestion, CheckPermission)
+3. `send_command` can respond to AskUserQuestion and CheckPermission prompts on a downstream agent
+4. `spawn_agent` can launch a new agent and deliver an initial command after agent readiness
+5. All existing tmux interaction (`list_agents`, `cleanup_dead_sessions`) refactored to libtmux
+6. All research questions resolved with documented findings
+7. Test harness validates state detection and command delivery
+
 ### Won't Have (this iteration)
 
 - Bidirectional streaming / real-time output watching
@@ -61,10 +80,13 @@ Agents also need to spawn remote sessions via tmux primitives which is not robus
 - Research https://github.com/tmux-python/libtmux
   - Determine what capabilities we can leverage to make this solution robust
   - Offer ideas for enhanced functionality not requested here that might help solve for the problem statement
+- Determine reliable method for detecting whether a tmux session is running an LLM instance (needed by `spawn_agent` and `close_session` session resolution logic)
+  - Options: waggle DB lookup, process tree inspection, pane content heuristics, or combination
 
 ## New MCP Tools
 
 `send_command`
+- Validates session_id against waggle DB. Returns error if session not registered.
 - **Note**: Pane targeting approach (multi-pane sessions) TBD per Research section
 - State-aware: reads pane state before sending. Refuses to send if agent is in Working state (returns error: "agent is busy").
 - ensures the text input field is clear
@@ -77,6 +99,7 @@ Agents also need to spawn remote sessions via tmux primitives which is not robus
   - command: the command to send as a string
 - Returns: `{status: "success"|"error", message: str}`
 `read_pane`
+- Validates session_id against waggle DB. Returns error if session not registered.
 - **Note**: Pane targeting approach (multi-pane sessions) TBD per Research section
 - reads current status of pane to determine agent state
 - is capable of understanding the following states:
@@ -90,7 +113,8 @@ Agents also need to spawn remote sessions via tmux primitives which is not robus
 - `read_pane` takes the following params:
   - session_id: tmux session id to read from
   - scrollback [optional, default: 50, no max]: number of scrollback lines to return.
-- Returns: `{status: "success"|"error", agent_state: "working"|"done"|"ask_user"|"check_permission", content: str, prompt_data: dict|null}`
+- Returns: `{status: "success"|"error", agent_state: "working"|"done"|"ask_user"|"check_permission"|"unknown", content: str, prompt_data: dict|null}`
+  - `unknown` returned when pane content doesn't match any known state (e.g., agent crashed, no agent running). Raw content still returned for caller inspection.
   - `prompt_data` populated when agent_state is `ask_user` or `check_permission` with structured question/options
 `spawn_agent`
 - `spawn_agent` takes the following params:
@@ -98,8 +122,10 @@ Agents also need to spawn remote sessions via tmux primitives which is not robus
   - session_name: the name of the tmux session to use
   - agent: claude or opencode
   - model [optional]: the claude model to use (Haiku, Sonnet or Opus)
-  - command [optional]: the command to give the agent when it starts
+  - command [optional]: command to give the agent after it reaches ready state
   - settings [optional]: any command line params (e.g --dangerously-skip-permissions)
+- Without `command`: returns immediately after launching. Agent may still be initializing — caller should poll with `read_pane`.
+- With `command`: after launching, polls with `read_pane` until agent reaches Done state, then sends command via `send_command`. Returns after command is delivered.
 - Session resolution logic:
   - if session_name does not exist → create tmux session at repo path, launch LLM agent
   - if session_name exists AND is running an LLM instance → error: "LLM already running in session"
@@ -108,14 +134,15 @@ Agents also need to spawn remote sessions via tmux primitives which is not robus
     - if session is in a different repo → error: "session exists but is in wrong repo"
 - Returns: `{status: "success"|"error", session_id: str, session_name: str, message: str}`
 `close_session`
+- Validates session_id against waggle DB. Returns error if session not registered.
 - `close_session` takes the following params:
   - `session_name` [optional]: tmux session name. can be provided to remove ambiguity
   - `session_id`: the tmux session_id to close
   - `force` [optional, default: false]: required when session has an active LLM agent
   - if both `session_name` and `session_id` are provided, `close_session` will only close the session if both match
-- cleans up an active session
-- if the session is running an LLM agent then it must be called with `-force` 
-  - otherwise returns an error saying "Active LLM agent, call again with -force to confirm"
+- cleans up an active session: kills the tmux session AND removes the agent from waggle's DB registry
+- if the session is running an LLM agent then it must be called with `force=true`
+  - otherwise returns an error saying "Active LLM agent, call again with force=true to confirm"
 - otherwise, closes the tmux session
 - Returns: `{status: "success"|"error", message: str}`
 
