@@ -456,25 +456,6 @@ class TestListAgents:
         assert result["agents"][0]["directory"] is None  # Couldn't enrich with tmux data
 
     @pytest.mark.asyncio
-    async def test_list_agents_handles_tmux_timeout(self, mock_ctx, mock_cleanup, mock_get_sessions, mock_db_path, mock_db_connection):
-        """Verify list_agents returns DB agents even when tmux command times out."""
-        mock_conn, mock_cursor = mock_db_connection
-        # get_sessions handles errors internally and returns []
-        mock_get_sessions.return_value = []
-
-        # DB has one registered agent
-        mock_cursor.fetchall.return_value = [
-            ("agent1+$0+1234567890", "/path1", "working")
-        ]
-
-        result = await list_agents(ctx=mock_ctx)
-
-        assert result["status"] == "success"
-        assert len(result["agents"]) == 1
-        assert result["agents"][0]["name"] == "agent1"
-        assert result["agents"][0]["directory"] is None  # Couldn't enrich with tmux data
-
-    @pytest.mark.asyncio
     async def test_list_agents_includes_namespace_field(self, mock_ctx, mock_cleanup, mock_get_sessions, mock_db_path, mock_db_connection):
         """Verify list_agents includes namespace field in output."""
         mock_conn, mock_cursor = mock_db_connection

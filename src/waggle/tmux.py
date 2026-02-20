@@ -33,7 +33,7 @@ def get_sessions() -> list[dict]:
                 "session_path": s.session_path,
             })
         return result
-    except (LibTmuxException, Exception):
+    except Exception:
         return []
 
 
@@ -52,7 +52,7 @@ def get_active_session_keys() -> set[str]:
             f"{s['session_name']}+{s['session_id']}+{s['session_created']}"
             for s in sessions
         }
-    except (LibTmuxException, Exception):
+    except Exception:
         return set()
 
 
@@ -73,7 +73,7 @@ def is_llm_running(pane: libtmux.Pane) -> bool:
         if cmd is None:
             return False
         return cmd.lower() in ("claude", "opencode")
-    except (LibTmuxException, Exception):
+    except Exception:
         return False
 
 
@@ -149,7 +149,7 @@ def _check_llm_running_sync(session_id: str) -> bool:
         session = server.sessions.get(session_id=session_id)
         pane = session.active_window.active_pane
         return is_llm_running(pane)
-    except (LibTmuxException, Exception):
+    except Exception:
         return False
 
 

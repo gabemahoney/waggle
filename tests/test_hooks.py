@@ -1076,3 +1076,29 @@ exit 0
             key = "test-session+abc123+1234567890"
             value = get_db_value(db_path, key)
             assert value is None, f"Expected no DB write for agent_type={agent_type!r}"
+
+    def test_delete_works_even_when_agent_type_is_subagent(
+        self, set_state_hook, temp_home, db_path
+    ):
+        """--delete must succeed even for non-team-lead agents (sub-agent cleanup)."""
+        from waggle.database import init_schema
+        init_schema(db_path)
+        key = "test-session+abc123+1234567890"
+        # Pre-populate DB so there is an entry to delete
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "INSERT OR REPLACE INTO state (key, repo, status, updated_at) VALUES (?, ?, ?, ?)",
+            (key, str(temp_home), "working", "2024-01-01T00:00:00"),
+        )
+        conn.commit()
+        conn.close()
+
+        result = run_set_state_hook(
+            set_state_hook, "--delete",
+            cwd=str(temp_home),
+            env={"CLAUDE_CODE_AGENT_TYPE": "teammate"}
+        )
+
+        assert result.returncode == 0
+        value = get_db_value(db_path, key)
+        assert value is None, "Delete must remove DB entry even for non-team-lead agent type"

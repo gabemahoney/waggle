@@ -4,6 +4,7 @@ Provides FastMCP server initialization with database integration.
 """
 
 import asyncio
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse, unquote
@@ -606,7 +607,7 @@ async def spawn_agent(
         with connection(db_path) as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO state (key, repo, status, updated_at) VALUES (?, ?, ?, ?)",
-                (key, repo_path, "working", "now"),
+                (key, repo_path, "working", datetime.now(timezone.utc).isoformat()),
             )
     except Exception as e:
         return {
