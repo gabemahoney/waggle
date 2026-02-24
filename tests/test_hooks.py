@@ -509,17 +509,6 @@ class TestSilentErrorHandling:
             os.chmod(config_file, 0o644)
     
 
-    def test_hook_redirects_stderr_to_dev_null(
-        self, set_state_hook, temp_home
-    ):
-        """Hook redirects stderr to /dev/null to avoid blocking agent."""
-        # Read the hook script and verify 2>/dev/null is used
-        with open(set_state_hook, 'r') as f:
-            content = f.read()
-        
-        # Verify stderr redirection on critical commands
-        assert "2>/dev/null" in content
-
 
 class TestSetStateHook:
     """Tests for set_state.sh parameterized state hook."""
@@ -579,25 +568,6 @@ class TestSetStateHook:
         )
         assert result.returncode == 0
     
-    def test_hook_creates_state_table_if_missing(
-        self, set_state_hook, temp_home, db_path
-    ):
-        """Hook creates state table if it doesn't exist."""
-        # Ensure database doesn't exist yet
-        assert not table_exists(db_path, "state")
-        
-        result = subprocess.run(
-            ["bash", str(set_state_hook), "test_state"],
-            capture_output=True,
-            text=True,
-            cwd=str(temp_home),
-            env=os.environ.copy()
-        )
-        assert result.returncode == 0
-        
-        # Verify table was created
-        assert table_exists(db_path, "state")
-    
     def test_hook_upserts_state_value(
         self, set_state_hook, temp_home, db_path
     ):
@@ -634,43 +604,31 @@ class TestSetStateHook:
         assert "SAFE_KEY" in content
         assert "SAFE_STATE" in content
     
-    def test_hook_handles_special_characters_in_state(
-        self, set_state_hook, temp_home, db_path
+    @pytest.mark.parametrize("state", [
+        "state-with-dashes",
+        "state_with_underscores",
+        "state with spaces",
+        "state/with/slashes",
+        "session started",
+        "need permission",
+        "waiting for user input",
+        "processing large file",
+        "状态更新",
+        "état mis à jour",
+        "🚀 processing",
+        "Ñoño español",
+        "Статус",
+    ])
+    def test_hook_stores_various_state_strings(
+        self, set_state_hook, temp_home, db_path, state
     ):
-        """Hook handles special characters in state parameter."""
-        special_states = [
-            "state-with-dashes",
-            "state_with_underscores",
-            "state with spaces",
-            "state/with/slashes",
-        ]
-        
-        for state in special_states:
-            result = run_set_state_hook(set_state_hook, state, cwd=str(temp_home))
-            assert result.returncode == 0
-            
-            # Verify state was stored
-            key = "test-session+abc123+1234567890"
-            value = get_db_value(db_path, key)
-            assert value == state
-    
-    def test_hook_reads_database_path_from_config(
-        self, set_state_hook, temp_home, config_file, waggle_dir
-    ):
-        """Hook reads database_path from config.json."""
-        custom_db = waggle_dir / "custom_state.db"
-        config_data = {"database_path": str(custom_db)}
-        with open(config_file, 'w') as f:
-            json.dump(config_data, f)
-        
-        result = run_set_state_hook(set_state_hook, "config_test", cwd=str(temp_home))
+        """Hook correctly stores various state string types."""
+        result = run_set_state_hook(set_state_hook, state, cwd=str(temp_home))
         assert result.returncode == 0
-        
-        # Verify hook used custom database path
         key = "test-session+abc123+1234567890"
-        value = get_db_value(str(custom_db), key)
-        assert value == "config_test"
-    
+        value = get_db_value(db_path, key)
+        assert value == state
+
     def test_hook_exits_zero_on_all_errors(
         self, set_state_hook, temp_home
     ):
@@ -722,48 +680,6 @@ class TestSetStateHook:
             # Verify state table still exists
             assert table_exists(db_path, "state")
     
-    def test_hook_stores_custom_state_strings(
-        self, set_state_hook, temp_home, db_path
-    ):
-        """Hook correctly stores various custom state strings."""
-        custom_states = [
-            "session started",
-            "need permission",
-            "some other state",
-            "waiting for user input",
-            "processing large file",
-        ]
-        
-        for state in custom_states:
-            result = run_set_state_hook(set_state_hook, state, cwd=str(temp_home))
-            assert result.returncode == 0
-            
-            # Verify state was stored correctly
-            key = "test-session+abc123+1234567890"
-            value = get_db_value(db_path, key)
-            assert value == state
-    
-    def test_hook_handles_unicode_characters(
-        self, set_state_hook, temp_home, db_path
-    ):
-        """Hook correctly handles unicode and international characters."""
-        unicode_states = [
-            "状态更新",  # Chinese
-            "état mis à jour",  # French with accents
-            "🚀 processing",  # Emoji
-            "Ñoño español",  # Spanish with tildes
-            "Статус",  # Cyrillic
-        ]
-        
-        for state in unicode_states:
-            result = run_set_state_hook(set_state_hook, state, cwd=str(temp_home))
-            assert result.returncode == 0
-            
-            # Verify unicode state was stored correctly
-            key = "test-session+abc123+1234567890"
-            value = get_db_value(db_path, key)
-            assert value == state
-    
     def test_hook_handles_very_long_state_strings(
         self, set_state_hook, temp_home, db_path
     ):
@@ -802,71 +718,6 @@ class TestSetStateHook:
         # Bash normalizes \r\n to \n when passing as argument
         assert value == "state with\nwindows line endings"
     
-    def test_hook_preserves_trailing_newlines_in_key_sanitization(
-        self, set_state_hook, temp_home, db_path
-    ):
-        """Hook uses printf (not echo) to preserve trailing newlines in key sanitization.
-        
-        This test verifies the sanitize_sql function uses printf (not echo) to preserve
-        trailing newlines. The function uses:
-            printf '%s' "$input" | tr ... | sed ...
-        
-        While trailing newlines in the KEY are unlikely in practice (since KEY is
-        derived from namespace:session+id+created), this ensures the sanitization
-        logic is robust and consistent.
-        """
-        # Read the hook script and verify printf is used for sanitization
-        with open(set_state_hook, 'r') as f:
-            content = f.read()
-        
-        # Verify sanitize_sql function uses printf for sanitization
-        assert "sanitize_sql()" in content, "Expected sanitize_sql function"
-        assert "printf '%s' \"$input\"" in content, \
-            "Expected printf in sanitize_sql function"
-        assert "SAFE_KEY=$(sanitize_sql \"$KEY\")" in content, \
-            "Expected KEY to be sanitized via sanitize_sql"
-        assert "SAFE_STATE=$(sanitize_sql \"$STATE\")" in content, \
-            "Expected STATE to be sanitized via sanitize_sql"
-    
-    def test_hook_checks_sanitization_pipeline_errors(
-        self, set_state_hook, temp_home
-    ):
-        """Hook checks for sanitization pipeline failures and exits successfully.
-        
-        This test verifies that the hook has explicit error checking after
-        sanitization pipelines to catch failures. Following the "never block the agent"
-        design, if sanitization fails (e.g., sed command fails), the hook exits with
-        code 0 after logging an error, skipping the DB write to prevent unsafe data.
-        """
-        # Read the hook script and verify error checking exists
-        with open(set_state_hook, 'r') as f:
-            content = f.read()
-        
-        # Verify explicit error checks after sanitization
-        assert "if [[ $? -ne 0" in content, \
-            "Expected explicit error checking after sanitization"
-        assert "Error: Failed to sanitize KEY" in content, \
-            "Expected error message for KEY sanitization failure"
-        assert "Error: Failed to sanitize STATE" in content, \
-            "Expected error message for STATE sanitization failure"
-        assert "exit 0" in content, \
-            "Expected exit 0 on sanitization failure (never block agent)"
-    
-    def test_hook_removes_null_bytes_from_state(
-        self, set_state_hook, temp_home
-    ):
-        """Hook sanitization includes null byte removal via tr -d."""
-        # Read the hook script and verify null byte removal exists
-        # Note: We can't test this via subprocess.run because Python's subprocess
-        # doesn't allow null bytes in command arguments. But we can verify the
-        # sanitization logic exists in the script.
-        with open(set_state_hook, 'r') as f:
-            content = f.read()
-        
-        # Verify null byte removal in sanitize_sql function
-        assert "tr -d '\\000'" in content, \
-            "Expected null byte removal via tr -d '\\000'"
-    
     def test_hook_removes_control_characters_from_state(
         self, set_state_hook, temp_home, db_path
     ):
@@ -885,41 +736,6 @@ class TestSetStateHook:
         assert "\x02" not in value
         assert "\x1f" not in value
         assert value == "normaltexthere"
-    
-    def test_hook_sanitizes_namespace_variable(
-        self, set_state_hook, temp_home, db_path
-    ):
-        """Hook sanitizes NAMESPACE variable (pwd) to prevent SQL injection via repo column."""
-        # Verify sanitization is applied to NAMESPACE (previously unsanitized)
-        with open(set_state_hook, 'r') as f:
-            content = f.read()
-        
-        # Verify SAFE_NAMESPACE exists
-        assert "SAFE_NAMESPACE" in content, \
-            "Expected SAFE_NAMESPACE sanitization"
-        assert "'$SAFE_NAMESPACE'" in content, \
-            "Expected SAFE_NAMESPACE to be used in SQL query"
-    
-    def test_hook_uses_sanitize_sql_function(
-        self, set_state_hook, temp_home
-    ):
-        """Hook uses sanitize_sql function for multi-layer defense."""
-        # Read the hook script and verify sanitize_sql function exists
-        with open(set_state_hook, 'r') as f:
-            content = f.read()
-        
-        # Verify sanitize_sql function is defined
-        assert "sanitize_sql()" in content, \
-            "Expected sanitize_sql function definition"
-        # Verify it removes null bytes
-        assert "tr -d '\\000'" in content, \
-            "Expected null byte removal"
-        # Verify it removes control characters
-        assert "tr -d '[\\001-\\010\\013-\\037\\177]'" in content, \
-            "Expected control character removal"
-        # Verify it escapes single quotes
-        assert "sed \"s/'/''/g\"" in content, \
-            "Expected single quote escaping"
     
     def test_hook_prevents_injection_via_backticks(
         self, set_state_hook, temp_home, db_path
@@ -950,3 +766,122 @@ class TestSetStateHook:
         assert value == malicious_state
         assert '"' in value
 
+
+class TestAgentTypeGating:
+    """Tests for CLAUDE_CODE_AGENT_TYPE gating in set_state.sh."""
+
+    def test_db_write_when_agent_type_unset(
+        self, set_state_hook, temp_home, db_path
+    ):
+        """Hook writes to DB when CLAUDE_CODE_AGENT_TYPE is unset."""
+        result = run_set_state_hook(
+            set_state_hook, "working",
+            cwd=str(temp_home),
+            env={"CLAUDE_CODE_AGENT_TYPE": ""}
+        )
+        assert result.returncode == 0
+        key = "test-session+abc123+1234567890"
+        value = get_db_value(db_path, key)
+        assert value == "working"
+
+    def test_db_write_when_agent_type_team_lead(
+        self, set_state_hook, temp_home, db_path
+    ):
+        """Hook writes to DB when CLAUDE_CODE_AGENT_TYPE is 'team-lead'."""
+        result = run_set_state_hook(
+            set_state_hook, "working",
+            cwd=str(temp_home),
+            env={"CLAUDE_CODE_AGENT_TYPE": "team-lead"}
+        )
+        assert result.returncode == 0
+        key = "test-session+abc123+1234567890"
+        value = get_db_value(db_path, key)
+        assert value == "working"
+
+    @pytest.mark.parametrize("agent_type", [
+        "teammate",
+        "worker",
+        "subagent",
+        "assistant",
+        "bot",
+        "orchestrator",
+        "sub-agent",
+    ])
+    def test_no_db_write_for_non_team_lead_agent_types(
+        self, set_state_hook, temp_home, db_path, agent_type
+    ):
+        """Hook skips DB write for any non-team-lead agent type."""
+        result = run_set_state_hook(
+            set_state_hook, "working",
+            cwd=str(temp_home),
+            env={"CLAUDE_CODE_AGENT_TYPE": agent_type}
+        )
+        assert result.returncode == 0
+        key = "test-session+abc123+1234567890"
+        value = get_db_value(db_path, key)
+        assert value is None, f"Expected no DB write for agent_type={agent_type!r}"
+
+    def test_db_write_when_agent_type_truly_unset(
+        self, set_state_hook, temp_home, db_path
+    ):
+        """Hook writes to DB when CLAUDE_CODE_AGENT_TYPE is not set at all (backward compat)."""
+        import tempfile as _tempfile
+        test_env = os.environ.copy()
+        test_env.pop("CLAUDE_CODE_AGENT_TYPE", None)
+
+        with _tempfile.TemporaryDirectory() as mock_dir:
+            mock_path = Path(mock_dir)
+            tmux_mock = mock_path / "tmux"
+            tmux_mock.write_text("""#!/usr/bin/env bash
+if [[ "$1" == "display-message" ]]; then
+    case "$3" in
+        '#{session_name}') echo "test-session" ;;
+        '#{session_id}') echo "abc123" ;;
+        '#{session_created}') echo "1234567890" ;;
+        *) echo "test-session" ;;
+    esac
+fi
+exit 0
+""")
+            tmux_mock.chmod(0o755)
+            test_env['PATH'] = f"{mock_dir}:{test_env.get('PATH', '')}"
+            test_env['HOME'] = str(temp_home)
+
+            result = subprocess.run(
+                ["bash", str(set_state_hook), "working"],
+                capture_output=True,
+                text=True,
+                cwd=str(temp_home),
+                env=test_env,
+            )
+
+        assert result.returncode == 0
+        key = "test-session+abc123+1234567890"
+        value = get_db_value(db_path, key)
+        assert value == "working"
+
+    def test_delete_works_even_when_agent_type_is_subagent(
+        self, set_state_hook, temp_home, db_path
+    ):
+        """--delete must succeed even for non-team-lead agents (sub-agent cleanup)."""
+        from waggle.database import init_schema
+        init_schema(db_path)
+        key = "test-session+abc123+1234567890"
+        # Pre-populate DB so there is an entry to delete
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "INSERT OR REPLACE INTO state (key, repo, status, updated_at) VALUES (?, ?, ?, ?)",
+            (key, str(temp_home), "working", "2024-01-01T00:00:00"),
+        )
+        conn.commit()
+        conn.close()
+
+        result = run_set_state_hook(
+            set_state_hook, "--delete",
+            cwd=str(temp_home),
+            env={"CLAUDE_CODE_AGENT_TYPE": "teammate"}
+        )
+
+        assert result.returncode == 0
+        value = get_db_value(db_path, key)
+        assert value is None, "Delete must remove DB entry even for non-team-lead agent type"

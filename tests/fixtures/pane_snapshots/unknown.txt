@@ -1,0 +1,17 @@
+Last login: Wed Feb 19 09:14:22 on ttys003
+
+gmahoney@macbook waggle % git status
+On branch dev
+Your branch is up to date with 'origin/dev'.
+
+Changes not staged for commit:
+  (use "git add <file>..." to update staging area)
+  (use "git restore <file>..." to discard changes in working directory)
+        modified:   src/waggle/tmux.py
+
+Untracked files:
+  (use "git add" to include in what will be committed)
+        tests/fixtures/
+
+nothing added to commit but untracked files present (use "git add" to track)
+gmahoney@macbook waggle %
