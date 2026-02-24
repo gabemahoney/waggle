@@ -2,7 +2,11 @@
 id: b.7XP
 type: bee
 title: Add libtmux-based MCP tools for agent interaction
-status: worker
+labels:
+- libtmux
+- mcp-tools
+- orchestration
+parent: null
 children:
 - t1.3dyn
 - t1.t4TG
@@ -12,13 +16,11 @@ children:
 - t1.PHJH
 - t1.zhHA
 - t1.5ccN
-labels:
-- libtmux
-- mcp-tools
-- orchestration
-guid: 7XPvPQ3f4vbsGUKsjhfXqi
-schema_version: 1.0.0
 egg: null
+created_at: null
+status: finished
+schema_version: 1.0.0
+guid: 7XPvPQ3f4vbsGUKsjhfXqi
 ---
 
 ## Problem Statements

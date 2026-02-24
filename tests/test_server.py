@@ -2019,6 +2019,177 @@ class TestSendCommand:
         assert "Type something" in result["message"]
 
 
+class TestSendCommandNavigation:
+    """Tests for send_command() Down-arrow navigation for below-separator options."""
+
+    def _insert_session(self, db_path: str, session_id: str, session_name: str) -> str:
+        """Insert a state row and return the key."""
+        key = f"{session_name}+{session_id}+1111111111"
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "INSERT INTO state (key, repo, status, updated_at) VALUES (?, ?, ?, ?)",
+            (key, "/repo", "waiting", "2024-01-01T00:00:00"),
+        )
+        conn.commit()
+        conn.close()
+        return key
+
+    @pytest.mark.asyncio
+    async def test_navigation_required_sends_down_arrows_then_enter(self, mock_db_path):
+        """Verify navigation_required option sends Down arrows then Enter instead of number text.
+
+        Regression guard: before the b.PUY fix, selecting option 4 ("Chat about this")
+        would send "4" as text, which doesn't work for below-separator options.
+        After the fix, it sends Down arrows to navigate, then Enter to confirm.
+        """
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._insert_session(str(mock_db_path), "$1", "agent1")
+
+        prompt_data = {
+            "question": "Ready to mark as finished?",
+            "currently_selected": 1,
+            "options": [
+                {"number": 1, "label": "Yes", "description": "", "navigation_required": False},
+                {"number": 2, "label": "No", "description": "", "navigation_required": False},
+                {"number": 3, "label": "Type something.", "description": "", "navigation_required": False},
+                {"number": 4, "label": "Chat about this", "description": "", "navigation_required": True},
+            ],
+        }
+
+        with patch("waggle.server.capture_pane", new_callable=AsyncMock) as mock_capture, \
+             patch("waggle.server.state_parser.parse") as mock_parse, \
+             patch("waggle.server.send_keys_to_pane", new_callable=AsyncMock) as mock_send, \
+             patch("waggle.server.asyncio.sleep", new_callable=AsyncMock):
+            mock_capture.side_effect = [
+                {"status": "success", "content": "ask prompt"},
+                {"status": "success", "content": "working"},
+            ]
+            mock_parse.side_effect = [("ask_user", prompt_data), ("working", None)]
+            mock_send.return_value = {"status": "success"}
+
+            result = await send_command("$1", "4")
+
+        assert result["status"] == "success"
+        # 3 Down presses (from option 1 at idx 0 to option 4 at idx 3) + 1 Enter
+        assert mock_send.call_count == 4
+        # First 3 calls: Down key without Enter
+        for i in range(3):
+            c = mock_send.call_args_list[i]
+            assert c.args[1] == "Down"
+            assert c.kwargs.get("enter") is False or c.args[3] is False
+        # Last call: empty string with Enter
+        last = mock_send.call_args_list[3]
+        assert last.args[1] == ""
+        assert last.kwargs.get("enter") is True or last.args[3] is True
+
+    @pytest.mark.asyncio
+    async def test_non_navigation_option_sends_number_as_text(self, mock_db_path):
+        """Verify non-navigation_required option still sends number as text (unchanged behavior)."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._insert_session(str(mock_db_path), "$1", "agent1")
+
+        prompt_data = {
+            "question": "Ready to mark as finished?",
+            "currently_selected": 1,
+            "options": [
+                {"number": 1, "label": "Yes", "description": "", "navigation_required": False},
+                {"number": 2, "label": "No", "description": "", "navigation_required": False},
+                {"number": 3, "label": "Type something.", "description": "", "navigation_required": False},
+                {"number": 4, "label": "Chat about this", "description": "", "navigation_required": True},
+            ],
+        }
+
+        with patch("waggle.server.capture_pane", new_callable=AsyncMock) as mock_capture, \
+             patch("waggle.server.state_parser.parse") as mock_parse, \
+             patch("waggle.server.send_keys_to_pane", new_callable=AsyncMock) as mock_send:
+            mock_capture.side_effect = [
+                {"status": "success", "content": "ask prompt"},
+                {"status": "success", "content": "working"},
+            ]
+            mock_parse.side_effect = [("ask_user", prompt_data), ("working", None)]
+            mock_send.return_value = {"status": "success"}
+
+            result = await send_command("$1", "1")
+
+        assert result["status"] == "success"
+        # Single call with the number as text (default enter=True)
+        assert mock_send.call_count == 1
+        assert mock_send.call_args.args[1] == "1"
+
+    @pytest.mark.asyncio
+    async def test_navigation_required_correct_down_count_from_middle(self, mock_db_path):
+        """Verify Down arrow count is correct when currently_selected is not option 1."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._insert_session(str(mock_db_path), "$1", "agent1")
+
+        prompt_data = {
+            "question": "Pick one",
+            "currently_selected": 2,
+            "options": [
+                {"number": 1, "label": "A", "description": "", "navigation_required": False},
+                {"number": 2, "label": "B", "description": "", "navigation_required": False},
+                {"number": 3, "label": "Type something.", "description": "", "navigation_required": False},
+                {"number": 4, "label": "Chat about this", "description": "", "navigation_required": True},
+            ],
+        }
+
+        with patch("waggle.server.capture_pane", new_callable=AsyncMock) as mock_capture, \
+             patch("waggle.server.state_parser.parse") as mock_parse, \
+             patch("waggle.server.send_keys_to_pane", new_callable=AsyncMock) as mock_send, \
+             patch("waggle.server.asyncio.sleep", new_callable=AsyncMock):
+            mock_capture.side_effect = [
+                {"status": "success", "content": "ask prompt"},
+                {"status": "success", "content": "working"},
+            ]
+            mock_parse.side_effect = [("ask_user", prompt_data), ("working", None)]
+            mock_send.return_value = {"status": "success"}
+
+            result = await send_command("$1", "4")
+
+        assert result["status"] == "success"
+        # currently_selected=2 (idx 1) → target=4 (idx 3) → 2 Downs + 1 Enter
+        assert mock_send.call_count == 3
+        for i in range(2):
+            assert mock_send.call_args_list[i].args[1] == "Down"
+        assert mock_send.call_args_list[2].args[1] == ""
+
+    @pytest.mark.asyncio
+    async def test_navigation_does_not_call_clear_pane(self, mock_db_path):
+        """Verify clear_pane_input is NOT called for ask_user navigation path."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._insert_session(str(mock_db_path), "$1", "agent1")
+
+        prompt_data = {
+            "question": "Pick one",
+            "currently_selected": 1,
+            "options": [
+                {"number": 1, "label": "A", "description": "", "navigation_required": False},
+                {"number": 2, "label": "Chat about this", "description": "", "navigation_required": True},
+            ],
+        }
+
+        with patch("waggle.server.capture_pane", new_callable=AsyncMock) as mock_capture, \
+             patch("waggle.server.state_parser.parse") as mock_parse, \
+             patch("waggle.server.clear_pane_input", new_callable=AsyncMock) as mock_clear, \
+             patch("waggle.server.send_keys_to_pane", new_callable=AsyncMock) as mock_send, \
+             patch("waggle.server.asyncio.sleep", new_callable=AsyncMock):
+            mock_capture.side_effect = [
+                {"status": "success", "content": "ask prompt"},
+                {"status": "success", "content": "working"},
+            ]
+            mock_parse.side_effect = [("ask_user", prompt_data), ("working", None)]
+            mock_send.return_value = {"status": "success"}
+
+            result = await send_command("$1", "2")
+
+        assert result["status"] == "success"
+        mock_clear.assert_not_called()
+
+
 class TestSpawnAgent:
     """Tests for spawn_agent() MCP tool — launching agents in tmux sessions."""
 

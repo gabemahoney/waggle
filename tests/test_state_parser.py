@@ -131,6 +131,26 @@ class TestAskUserState:
         assert "All acceptance criteria met" in data["options"][0]["description"]
         assert "additional work" in data["options"][1]["description"]
 
+    def test_ask_user_currently_selected(self, ask_user_pane):
+        """Verify currently_selected is set to the ❯-highlighted option number."""
+        _, data = parse(ask_user_pane)
+        assert data["currently_selected"] == 1
+
+    def test_ask_user_navigation_required_above_separator(self, ask_user_pane):
+        """Verify options above ─── separator have navigation_required=False."""
+        _, data = parse(ask_user_pane)
+        for opt in data["options"][:3]:
+            assert opt["navigation_required"] is False, (
+                f"Option {opt['number']} ({opt['label']}) above separator should not require navigation"
+            )
+
+    def test_ask_user_navigation_required_below_separator(self, ask_user_pane):
+        """Verify 'Chat about this' below ─── separator has navigation_required=True."""
+        _, data = parse(ask_user_pane)
+        chat_opt = data["options"][3]
+        assert chat_opt["label"] == "Chat about this"
+        assert chat_opt["navigation_required"] is True
+
     def test_numbered_list_in_output_not_ask_user(self):
         """Verify numbered list in plain output does not trigger ask_user state."""
         content = (
@@ -170,6 +190,22 @@ class TestAskUserState:
         _, data = parse(ask_user_with_history_pane)
         labels = [opt["label"] for opt in data["options"]]
         assert labels == ["Red", "Blue", "Type something.", "Chat about this"]
+
+    def test_ask_user_currently_selected_with_history(self, ask_user_with_history_pane):
+        """Verify currently_selected is correct when pane has scrollback with earlier ❯ lines."""
+        _, data = parse(ask_user_with_history_pane)
+        assert data["currently_selected"] == 1
+
+    def test_ask_user_navigation_required_with_history(self, ask_user_with_history_pane):
+        """Verify navigation_required is set correctly when pane has scrollback history."""
+        _, data = parse(ask_user_with_history_pane)
+        nav_flags = [(opt["label"], opt["navigation_required"]) for opt in data["options"]]
+        assert nav_flags == [
+            ("Red", False),
+            ("Blue", False),
+            ("Type something.", False),
+            ("Chat about this", True),
+        ]
 
 
 class TestCheckPermissionState:

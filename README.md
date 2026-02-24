@@ -239,7 +239,9 @@ Read the current content and state of an agent's tmux pane.
 - `unknown` — content doesn't match any known pattern
 
 **Returns:** `{status, agent_state, content, prompt_data}`
-- `prompt_data` is populated for `ask_user` (question + options) and `check_permission` (tool type + command) states
+- `prompt_data` is populated for `ask_user` and `check_permission` states:
+  - **`ask_user`**: `{question, currently_selected, options}` — `currently_selected` is the option number highlighted by `❯` (or `null`). Each option has `{number, label, description, navigation_required}`. Options with `navigation_required: true` appear below the `───` separator (e.g. "Chat about this"); `send_command` handles navigation automatically.
+  - **`check_permission`**: `{tool_type, command, description}`
 
 **Examples:**
 ```
@@ -268,10 +270,10 @@ Send a command or response to an agent's tmux pane.
 - `working` state → rejected with `"agent is busy"`
 - `unknown` state → rejected with `"agent state unknown, cannot safely send"`
 - `done` state → `command` sent as-is
-- `ask_user` state → `command` must be a valid option number (e.g. `"1"`, `"2"`)
+- `ask_user` state → `command` must be a valid option number (e.g. `"1"`, `"2"`). Options below the `───` separator (like "Chat about this") are navigated to automatically via Down arrow keys — just pass the option number as usual.
 - `check_permission` state → `command` must be `"1"` (yes) or `"2"` (no)
 
-Sends `Ctrl+C` first to clear any partial input, then sends the command + Enter.
+For `done` state, sends `Ctrl+C` first to clear any partial input, then sends the command + Enter. For `ask_user` and `check_permission` states, `Ctrl+C` is skipped to avoid dismissing the dialog.
 Polls up to 5 seconds for a state transition to confirm delivery.
 
 **Returns:** `{status, message}`

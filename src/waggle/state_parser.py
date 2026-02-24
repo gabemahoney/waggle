@@ -136,7 +136,7 @@ def _parse_ask_user(content: str) -> dict:
     )
 
     if arrow_idx is None:
-        return {"question": "", "options": []}
+        return {"question": "", "currently_selected": None, "options": []}
 
     # Question: non-blank lines above the first option, skipping intervening blanks
     question_lines = []
@@ -153,13 +153,17 @@ def _parse_ask_user(content: str) -> dict:
     # Parse options from arrow_idx onward
     opt_pattern = re.compile(r"^[\s\u276f]*(\d+)\.\s+(.+)$")
     sep_pattern = re.compile(r"^\s*\u2500{3,}")
+    arrow_prefix = re.compile(r"^\s*\u276f")
 
     options: list[dict] = []
+    currently_selected: int | None = None
+    below_separator = False
     i = arrow_idx
     while i < len(lines):
         line = lines[i]
 
         if sep_pattern.match(line):
+            below_separator = True
             i += 1
             continue
 
@@ -168,6 +172,10 @@ def _parse_ask_user(content: str) -> dict:
             number = int(m.group(1))
             label = m.group(2).strip()
             description = ""
+
+            # Track currently highlighted option (line starts with ❯)
+            if arrow_prefix.match(line):
+                currently_selected = number
 
             # Check next line for an indented description
             if i + 1 < len(lines):
@@ -183,11 +191,13 @@ def _parse_ask_user(content: str) -> dict:
                 "number": number,
                 "label": label,
                 "description": description,
+                "navigation_required": below_separator,
             })
 
         i += 1
 
     return {
         "question": question,
+        "currently_selected": currently_selected,
         "options": options,
     }

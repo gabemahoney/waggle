@@ -29,7 +29,14 @@ Before sending, the tool reads and parses the current pane content to determine 
 
 ### ask_user Validation
 
-When the pane is showing an `ask_user` prompt, `state_parser.parse()` returns a `prompt_data` dict with an `"options"` list. Each option has a `"number"` field. The tool validates `command` against the set of valid option numbers. Invalid values are rejected with a descriptive error listing the valid choices.
+When the pane is showing an `ask_user` prompt, `state_parser.parse()` returns a `prompt_data` dict with:
+- `"question"` — the question text
+- `"currently_selected"` — the option number currently highlighted by `❯` (or `None`)
+- `"options"` — list of option dicts, each with `"number"`, `"label"`, `"description"`, and `"navigation_required"`
+
+The tool validates `command` against the set of valid option numbers. Invalid values are rejected with a descriptive error listing the valid choices.
+
+Options with `navigation_required: true` appear below the `───` separator in the Claude Code TUI (e.g. "Chat about this"). These cannot be selected by typing their number directly — the tool navigates to them using Down arrow keys (see Input Sequence below).
 
 ### check_permission Validation
 
@@ -45,6 +52,14 @@ For receptive states, the send sequence depends on agent state:
 
 **`ask_user` state (standard option):**
 1. `send_keys_to_pane(session_id, command, pane_id)` — sends the option number followed by Enter (no Ctrl+C — would dismiss the dialog)
+
+**`ask_user` state (`navigation_required` option):**
+Options below the `───` separator (e.g. "Chat about this") cannot be selected by typing their number. Instead:
+1. Compute the number of Down arrow presses needed: `target_index - current_index` using the ordered options list and `currently_selected` from `prompt_data`
+2. Send `Down` key (without Enter) for each step, with `asyncio.sleep(0.05)` between presses
+3. Send Enter to confirm the selection
+
+If `currently_selected` is `None`, defaults to the first option in the list.
 
 **`ask_user` state (`custom_text`):**
 1. `send_keys_to_pane(session_id, command, pane_id, enter=False)` — selects "Type something." option without Enter
@@ -162,6 +177,15 @@ sequenceDiagram
         Note over SC,TM: asyncio.sleep(0.3)
         SC->>TM: send_keys_to_pane(session_id, custom_text, pane_id)
         TM->>TX: pane.send_keys(custom_text, enter=True)
+    else agent_state == "ask_user" and navigation_required
+        Note over SC,TM: Compute downs = target_idx - current_idx
+        loop downs times
+            SC->>TM: send_keys_to_pane(session_id, "Down", pane_id, enter=False)
+            TM->>TX: pane.send_keys("Down", enter=False)
+            Note over SC,TM: asyncio.sleep(0.05)
+        end
+        SC->>TM: send_keys_to_pane(session_id, "", pane_id, enter=True)
+        TM->>TX: pane.send_keys("", enter=True)
     else agent_state == "ask_user" or "check_permission"
         SC->>TM: send_keys_to_pane(session_id, command, pane_id)
         TM->>TX: pane.send_keys(command, enter=True)

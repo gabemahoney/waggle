@@ -405,12 +405,14 @@ async def read_pane(
                 "content": str,       # Raw pane text
                 "prompt_data": {      # Only populated for ask_user and check_permission
                     # ask_user — agent is asking a question with numbered options:
-                    #   "question": str           — the question text
-                    #   "options": [              — list of choices
+                    #   "question": str                  — the question text
+                    #   "currently_selected": int | null — option number highlighted by ❯
+                    #   "options": [                     — list of choices
                     #       {
-                    #           "number": int,    — pass this to send_command as command
-                    #           "label": str,     — human-readable label
-                    #           "description": str
+                    #           "number": int,           — pass this to send_command as command
+                    #           "label": str,            — human-readable label
+                    #           "description": str,
+                    #           "navigation_required": bool — true for options below ─── separator
                     #       }, ...
                     #   ]
                     #   One option will always be labelled "Type something." — to choose it,
@@ -548,6 +550,35 @@ async def send_command(
             return send_result
         await asyncio.sleep(0.3)
         send_result = await send_keys_to_pane(session_id, custom_text, pane_id, enter=True)
+    elif (
+        agent_state == "ask_user"
+        and prompt_data
+        and any(
+            opt.get("navigation_required")
+            for opt in prompt_data["options"]
+            if str(opt["number"]) == command
+        )
+    ):
+        # Option is below separator — navigate with Down arrows then Enter
+        option_numbers = [opt["number"] for opt in prompt_data["options"]]
+        current = prompt_data.get("currently_selected")
+        if current is None and option_numbers:
+            current = option_numbers[0]
+        target = int(command)
+        current_idx = option_numbers.index(current) if current in option_numbers else 0
+        target_idx = option_numbers.index(target)
+        downs = target_idx - current_idx
+        if downs <= 0:
+            return {
+                "status": "error",
+                "message": f"cannot navigate to option {command}: cursor is already at or past target position",
+            }
+        for _ in range(downs):
+            send_result = await send_keys_to_pane(session_id, "Down", pane_id, enter=False)
+            if send_result["status"] != "success":
+                return send_result
+            await asyncio.sleep(0.05)
+        send_result = await send_keys_to_pane(session_id, "", pane_id, enter=True)
     else:
         send_result = await send_keys_to_pane(session_id, command, pane_id)
     if send_result["status"] != "success":
