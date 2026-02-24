@@ -168,6 +168,14 @@ For each active session it will show:
 - directory of that agent
 - tmux session id
 
+When an agents checks on another agent it will also provide the following more detailed states:
+- waiting — idle at prompt
+- working — actively running
+- ask_user — showing an AskUserQuestion prompt
+- check_permission — waiting for tool approval
+- done — session ended
+- unknown
+
 ### Advanced Usage
 
 The server also offers the ability to forcibly delete entries from the db if for some reason it ever gets into a bad state.

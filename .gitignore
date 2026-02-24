@@ -44,3 +44,7 @@ auto_approve.sh
 
 # Claude
 .claude/
+
+# Local development (tickets/features - dev branch only)
+bugs/
+features/
