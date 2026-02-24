@@ -1955,6 +1955,69 @@ class TestSendCommand:
         assert result["status"] == "success"
         mock_clear.assert_called_once_with("$1", None)
 
+    @pytest.mark.asyncio
+    async def test_custom_text_sends_option_without_enter_then_text_with_enter(self, mock_db_path):
+        """Verify custom_text sends option without Enter, then custom_text with Enter."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._insert_session(str(mock_db_path), "$1", "agent1")
+
+        prompt_data = {
+            "question": "What is your favorite color?",
+            "options": [
+                {"number": 1, "label": "Red", "description": ""},
+                {"number": 2, "label": "Blue", "description": ""},
+                {"number": 3, "label": "Type something.", "description": ""},
+            ],
+        }
+
+        with patch("waggle.server.capture_pane", new_callable=AsyncMock) as mock_capture, \
+             patch("waggle.server.state_parser.parse") as mock_parse, \
+             patch("waggle.server.send_keys_to_pane", new_callable=AsyncMock) as mock_send:
+            mock_capture.side_effect = [
+                {"status": "success", "content": "ask prompt"},
+                {"status": "success", "content": "working"},
+            ]
+            mock_parse.side_effect = [("ask_user", prompt_data), ("working", None)]
+            mock_send.return_value = {"status": "success"}
+
+            result = await send_command("$1", "3", custom_text="teddybear")
+
+        assert result["status"] == "success"
+        assert mock_send.call_count == 2
+        first_call = mock_send.call_args_list[0]
+        second_call = mock_send.call_args_list[1]
+        # First call: option number without Enter
+        assert first_call.args[1] == "3"
+        assert first_call.kwargs.get("enter") is False or first_call.args[3] is False
+        # Second call: custom text with Enter (default)
+        assert second_call.args[1] == "teddybear"
+
+    @pytest.mark.asyncio
+    async def test_custom_text_rejected_for_non_type_something_option(self, mock_db_path):
+        """Verify custom_text is rejected when the selected option is not 'Type something.'."""
+        from waggle.database import init_schema
+        init_schema(str(mock_db_path))
+        self._insert_session(str(mock_db_path), "$1", "agent1")
+
+        prompt_data = {
+            "question": "What is your favorite color?",
+            "options": [
+                {"number": 1, "label": "Red", "description": ""},
+                {"number": 2, "label": "Type something.", "description": ""},
+            ],
+        }
+
+        with patch("waggle.server.capture_pane", new_callable=AsyncMock) as mock_capture, \
+             patch("waggle.server.state_parser.parse") as mock_parse:
+            mock_capture.return_value = {"status": "success", "content": "ask prompt"}
+            mock_parse.return_value = ("ask_user", prompt_data)
+
+            result = await send_command("$1", "1", custom_text="teddybear")
+
+        assert result["status"] == "error"
+        assert "Type something" in result["message"]
+
 
 class TestSpawnAgent:
     """Tests for spawn_agent() MCP tool — launching agents in tmux sessions."""

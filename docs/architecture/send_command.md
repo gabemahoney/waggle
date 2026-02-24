@@ -13,6 +13,7 @@ Defined in `src/waggle/server.py`. Delegates tmux operations to `src/waggle/tmux
 | `session_id` | `str` | Yes | — | tmux session ID (e.g. `"$1"`) |
 | `command` | `str` | Yes | — | Command text or option number to send to the pane |
 | `pane_id` | `str \| None` | No | `None` | Optional pane ID. If omitted, uses the session's active pane |
+| `custom_text` | `str \| None` | No | `None` | Free-form text for the "Type something." option in `ask_user` prompts. When provided, `command` must be the option number of "Type something." — the option is selected without Enter, then `custom_text` is typed and submitted |
 
 ## State-Aware Delivery
 
@@ -36,10 +37,22 @@ Permission prompts accept only `"1"` (approve) or `"2"` (deny). Any other value 
 
 ## Input Sequence
 
-For receptive states, the send sequence is:
+For receptive states, the send sequence depends on agent state:
 
+**`done` state:**
 1. `clear_pane_input(session_id, pane_id)` — sends `Ctrl+C` to discard any partial input
 2. `send_keys_to_pane(session_id, command, pane_id)` — sends the command followed by Enter
+
+**`ask_user` state (standard option):**
+1. `send_keys_to_pane(session_id, command, pane_id)` — sends the option number followed by Enter (no Ctrl+C — would dismiss the dialog)
+
+**`ask_user` state (`custom_text`):**
+1. `send_keys_to_pane(session_id, command, pane_id, enter=False)` — selects "Type something." option without Enter
+2. `asyncio.sleep(0.3)` — brief pause for the text input field to appear
+3. `send_keys_to_pane(session_id, custom_text, pane_id)` — sends the custom text followed by Enter
+
+**`check_permission` state:**
+1. `send_keys_to_pane(session_id, command, pane_id)` — sends "1" or "2" followed by Enter (no Ctrl+C — would dismiss the dialog)
 
 ## Delivery Verification
 
@@ -137,11 +150,22 @@ sequenceDiagram
         end
     end
 
-    Note over SC: Step 7: Clear then send
-    SC->>TM: clear_pane_input(session_id, pane_id)
-    TM->>TX: pane.send_keys("C-c", enter=False)
-    SC->>TM: send_keys_to_pane(session_id, command, pane_id)
-    TM->>TX: pane.send_keys(command, enter=True)
+    Note over SC: Step 7: Send (state-dependent)
+    alt agent_state == "done"
+        SC->>TM: clear_pane_input(session_id, pane_id)
+        TM->>TX: pane.send_keys("C-c", enter=False)
+        SC->>TM: send_keys_to_pane(session_id, command, pane_id)
+        TM->>TX: pane.send_keys(command, enter=True)
+    else agent_state == "ask_user" and custom_text provided
+        SC->>TM: send_keys_to_pane(session_id, command, pane_id, enter=False)
+        TM->>TX: pane.send_keys(command, enter=False)
+        Note over SC,TM: asyncio.sleep(0.3)
+        SC->>TM: send_keys_to_pane(session_id, custom_text, pane_id)
+        TM->>TX: pane.send_keys(custom_text, enter=True)
+    else agent_state == "ask_user" or "check_permission"
+        SC->>TM: send_keys_to_pane(session_id, command, pane_id)
+        TM->>TX: pane.send_keys(command, enter=True)
+    end
     TX-->>TM: ok
     TM-->>SC: {status: "success"}
 

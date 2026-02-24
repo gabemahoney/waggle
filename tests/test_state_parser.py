@@ -25,6 +25,11 @@ def ask_user_pane():
 
 
 @pytest.fixture
+def ask_user_with_history_pane():
+    return (FIXTURES / "ask_user_with_history.txt").read_text()
+
+
+@pytest.fixture
 def check_permission_pane():
     return (FIXTURES / "check_permission.txt").read_text()
 
@@ -149,6 +154,22 @@ class TestAskUserState:
         content = "Some output\n───────────────\nmore text"
         state, _ = parse(content)
         assert state != "ask_user"
+
+    def test_ask_user_with_history_classified_correctly(self, ask_user_with_history_pane):
+        """Verify ask_user state is detected when pane has scrollback with multiple ❯ lines."""
+        state, _ = parse(ask_user_with_history_pane)
+        assert state == "ask_user"
+
+    def test_ask_user_question_correct_with_history(self, ask_user_with_history_pane):
+        """Verify question is extracted from prompt, not from scrollback history."""
+        _, data = parse(ask_user_with_history_pane)
+        assert data["question"] == "What is your favorite color?"
+
+    def test_ask_user_options_correct_with_history(self, ask_user_with_history_pane):
+        """Verify options are parsed correctly when pane has scrollback history."""
+        _, data = parse(ask_user_with_history_pane)
+        labels = [opt["label"] for opt in data["options"]]
+        assert labels == ["Red", "Blue", "Type something.", "Chat about this"]
 
 
 class TestCheckPermissionState:

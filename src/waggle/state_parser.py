@@ -128,9 +128,11 @@ def _parse_ask_user(content: str) -> dict:
     """
     lines = content.splitlines()
 
-    # Find the line with ❯ to anchor option parsing
+    # Find the line with ❯ on the same line as a numbered option (e.g. "❯ 1. Yes").
+    # This skips history lines like "❯ some previous command" that lack a numbered option.
+    arrow_with_opt = re.compile(r"^\s*\u276f\s*\d+\.\s+")
     arrow_idx = next(
-        (i for i, line in enumerate(lines) if "\u276f" in line), None
+        (i for i, line in enumerate(lines) if arrow_with_opt.match(line)), None
     )
 
     if arrow_idx is None:
@@ -189,7 +191,3 @@ def _parse_ask_user(content: str) -> dict:
         "question": question,
         "options": options,
     }
-
-
-# Backward-compatible alias
-parse_pane = parse

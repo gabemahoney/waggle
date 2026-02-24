@@ -38,3 +38,9 @@ yarn-error.log*
 # Local environment
 .env
 .env.local
+
+# Local scripts
+auto_approve.sh
+
+# Claude
+.claude/

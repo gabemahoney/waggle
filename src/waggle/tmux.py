@@ -6,6 +6,7 @@ Server() is instantiated per-call (no module-level side effects).
 """
 
 import asyncio
+import re
 from pathlib import Path
 
 import libtmux
@@ -357,6 +358,9 @@ def _launch_agent_in_pane_sync(
         if model:
             cmd += f" --model {model.lower()}"
         if settings:
+            # Only allow characters valid in CLI flags to prevent shell injection
+            if re.search(r'[;&|`$(){}\\<>]', settings):
+                return {"status": "error", "message": "invalid characters in settings parameter"}
             cmd += f" {settings}"
         pane.send_keys(cmd, enter=True)
         return {"status": "success"}

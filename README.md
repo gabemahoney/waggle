@@ -262,6 +262,7 @@ Send a command or response to an agent's tmux pane.
 | `session_id` | Yes | tmux session ID (e.g. `"$1"`) |
 | `command` | Yes | Text to send (freeform, or option number for prompts) |
 | `pane_id` | No | Specific pane ID for multi-pane sessions |
+| `custom_text` | No | Free-form text for the "Type something." option in ask_user prompts. When set, `command` must be the number of the "Type something." option |
 
 **State-aware behavior:**
 - `working` state → rejected with `"agent is busy"`
@@ -284,6 +285,9 @@ Polls up to 5 seconds for a state transition to confirm delivery.
 
 "Approve the permission request in session $4"
 → send_command(session_id="$4", command="1")
+
+"Send a custom reply to an ask_user prompt's 'Type something.' option"
+→ send_command(session_id="$2", command="3", custom_text="my custom reply")
 ```
 
 ---

@@ -286,6 +286,31 @@ async def delete_repo_agents(
         }
 
 
+def _lookup_session_key(db_path: str, session_id: str) -> tuple[str | None, dict | None]:
+    """Look up the DB key for a session_id.
+
+    Returns:
+        (matching_key, None) on success
+        (None, error_dict) on DB error or not found
+    """
+    try:
+        with connection(db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT key FROM state WHERE key LIKE ?",
+                (f"%+{session_id}+%",),
+            )
+            rows = cursor.fetchall()
+            matching_key = rows[0][0] if rows else None
+    except Exception as e:
+        return None, {"status": "error", "message": f"Failed to query database: {str(e)}"}
+
+    if matching_key is None:
+        return None, {"status": "error", "message": f"Session '{session_id}' not found in database"}
+
+    return matching_key, None
+
+
 @mcp.tool()
 async def close_session(
     session_id: str,
@@ -311,20 +336,9 @@ async def close_session(
     db_path = get_db_path()
 
     # Step 1: Validate session_id exists in DB
-    try:
-        with connection(db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT key FROM state WHERE key LIKE ?",
-                (f"%+{session_id}+%",),
-            )
-            rows = cursor.fetchall()
-            matching_key = rows[0][0] if rows else None
-    except Exception as e:
-        return {"status": "error", "message": f"Failed to query database: {str(e)}"}
-
-    if matching_key is None:
-        return {"status": "error", "message": f"Session '{session_id}' not found in database"}
+    matching_key, err = _lookup_session_key(db_path, session_id)
+    if err:
+        return err
 
     # Step 2: Validate session_name if provided
     if session_name is not None:
@@ -384,26 +398,38 @@ async def read_pane(
         scrollback: Number of lines of scrollback to capture. Default 50.
 
     Returns:
-        {"status": "success", "agent_state": str, "content": str, "prompt_data": dict | None} or
-        {"status": "error", "message": str}
+        On success:
+            {
+                "status": "success",
+                "agent_state": "ask_user" | "check_permission" | "working" | "done" | "unknown",
+                "content": str,       # Raw pane text
+                "prompt_data": {      # Only populated for ask_user and check_permission
+                    # ask_user — agent is asking a question with numbered options:
+                    #   "question": str           — the question text
+                    #   "options": [              — list of choices
+                    #       {
+                    #           "number": int,    — pass this to send_command as command
+                    #           "label": str,     — human-readable label
+                    #           "description": str
+                    #       }, ...
+                    #   ]
+                    #   One option will always be labelled "Type something." — to choose it,
+                    #   pass its number as command AND provide custom_text to send_command.
+                    #
+                    # check_permission — agent wants approval to run a tool:
+                    #   "tool_type": str, "command": str, "description": str
+                    #   Pass "1" to approve or "2" to deny via send_command.
+                } | None
+            }
+        On error:
+            {"status": "error", "message": str}
     """
     db_path = get_db_path()
 
     # Step 1: Validate session_id exists in DB
-    try:
-        with connection(db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT key FROM state WHERE key LIKE ?",
-                (f"%+{session_id}+%",),
-            )
-            rows = cursor.fetchall()
-            matching_key = rows[0][0] if rows else None
-    except Exception as e:
-        return {"status": "error", "message": f"Failed to query database: {str(e)}"}
-
-    if matching_key is None:
-        return {"status": "error", "message": f"Session '{session_id}' not found in database"}
+    matching_key, err = _lookup_session_key(db_path, session_id)
+    if err:
+        return err
 
     # Step 2: Capture pane content
     capture_result = await capture_pane(session_id, pane_id, scrollback)
@@ -429,6 +455,7 @@ async def send_command(
     session_id: str,
     command: str,
     pane_id: str | None = None,
+    custom_text: str | None = None,
 ) -> dict:
     """Send a command to an agent's tmux pane.
 
@@ -438,8 +465,15 @@ async def send_command(
 
     Args:
         session_id: The tmux session ID (e.g. "$1"). Required.
-        command: The command text to send to the pane.
+        command: The command text to send to the pane. For ask_user and
+            check_permission states this must be a valid option number
+            (e.g. "1", "2"). Use read_pane first to discover available options.
         pane_id: Optional pane ID. If None, uses the session's active pane.
+        custom_text: Free-form text response for the "Type something." option
+            in ask_user prompts. When provided, command must be the number of
+            the "Type something." option. The option is selected without Enter,
+            then custom_text is typed and submitted.
+            Example: command="3", custom_text="teddybear"
 
     Returns:
         {"status": "success", "message": "command delivered"} or
@@ -448,20 +482,9 @@ async def send_command(
     db_path = get_db_path()
 
     # Step 1: Validate session_id in DB
-    try:
-        with connection(db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT key FROM state WHERE key LIKE ?",
-                (f"%+{session_id}+%",),
-            )
-            rows = cursor.fetchall()
-            matching_key = rows[0][0] if rows else None
-    except Exception as e:
-        return {"status": "error", "message": f"Failed to query database: {str(e)}"}
-
-    if matching_key is None:
-        return {"status": "error", "message": f"Session '{session_id}' not found in database"}
+    matching_key, err = _lookup_session_key(db_path, session_id)
+    if err:
+        return err
 
     # Step 2: Read current pane state
     capture_result = await capture_pane(session_id, pane_id)
@@ -491,6 +514,16 @@ async def send_command(
                     f"valid options are: {', '.join(sorted(valid_numbers))}"
                 ),
             }
+        if custom_text is not None:
+            selected = next(
+                (opt for opt in prompt_data["options"] if str(opt["number"]) == command),
+                None,
+            )
+            if selected is None or "Type something" not in selected.get("label", ""):
+                return {
+                    "status": "error",
+                    "message": "custom_text can only be used with the 'Type something.' option",
+                }
 
     # Step 6: Validate command for check_permission state
     if agent_state == "check_permission":
@@ -507,7 +540,16 @@ async def send_command(
         if clear_result["status"] != "success":
             return clear_result
 
-    send_result = await send_keys_to_pane(session_id, command, pane_id)
+    if custom_text is not None:
+        # "Type something." option: select without Enter to open the text field,
+        # then send the custom text with Enter to submit.
+        send_result = await send_keys_to_pane(session_id, command, pane_id, enter=False)
+        if send_result["status"] != "success":
+            return send_result
+        await asyncio.sleep(0.3)
+        send_result = await send_keys_to_pane(session_id, custom_text, pane_id, enter=True)
+    else:
+        send_result = await send_keys_to_pane(session_id, command, pane_id)
     if send_result["status"] != "success":
         return send_result
 
@@ -536,7 +578,7 @@ async def spawn_agent(
     model: str | None = None,
     command: str | None = None,
     settings: str | None = None,
-    ctx: Context = None,
+    ctx: Context | None = None,
 ) -> dict:
     """Launch a Claude or OpenCode agent in a tmux session.
 
