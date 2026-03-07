@@ -317,6 +317,7 @@ def _create_session_sync(session_name: str, repo_path: str) -> dict:
             session_name=session_name,
             start_directory=repo_path,
             attach=False,
+            environment={"VIRTUAL_ENV": "", "VIRTUAL_ENV_PROMPT": ""},
         )
         return {
             "status": "success",
