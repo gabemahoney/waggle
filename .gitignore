@@ -42,8 +42,9 @@ yarn-error.log*
 # Local scripts
 auto_approve.sh
 
-# Claude
-.claude/
+# Claude (ignore personal config, track skills)
+.claude/*
+!.claude/skills
 
 # Local development (tickets/features - dev branch only)
 bugs/
