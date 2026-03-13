@@ -1,7 +1,7 @@
 """
 Unit tests for OpenCode integration state tracking.
 
-Tests that the OpenCode plugin correctly calls set_state.sh,
+Tests that the OpenCode plugin correctly calls waggle_set_state.sh,
 which automatically extracts namespace from pwd and session info from tmux.
 """
 
@@ -22,8 +22,8 @@ def hook_dir():
 
 @pytest.fixture
 def set_state_hook(hook_dir):
-    """Path to set_state.sh hook."""
-    return hook_dir / "set_state.sh"
+    """Path to waggle_set_state.sh hook."""
+    return hook_dir / "waggle_set_state.sh"
 
 
 def run_hook_with_mocked_tmux(
@@ -35,7 +35,7 @@ def run_hook_with_mocked_tmux(
     session_id: str = "$999",
     session_created: str = "1234567890"
 ) -> subprocess.CompletedProcess:
-    """Run set_state.sh with mocked tmux and custom config."""
+    """Run waggle_set_state.sh with mocked tmux and custom config."""
     # Create mock tmux script
     with tempfile.TemporaryDirectory() as mock_dir:
         mock_path = Path(mock_dir)
@@ -82,7 +82,7 @@ class TestOpenCodeIntegration:
     """Test OpenCode plugin integration with waggle state database."""
 
     def test_set_state_builds_correct_key(self, tmp_path, set_state_hook):
-        """Test set_state.sh builds composite key from pwd and tmux session info."""
+        """Test waggle_set_state.sh builds composite key from pwd and tmux session info."""
         db_path = str(tmp_path / "test_state.db")
         state = "working"
         
@@ -93,7 +93,7 @@ class TestOpenCodeIntegration:
             str(tmp_path)
         )
         
-        assert result.returncode == 0, f"set_state.sh failed: {result.stderr}"
+        assert result.returncode == 0, f"waggle_set_state.sh failed: {result.stderr}"
         
         # Verify database was updated
         conn = sqlite3.connect(db_path)

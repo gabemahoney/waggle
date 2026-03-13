@@ -50,8 +50,8 @@ def hook_dir():
 
 @pytest.fixture
 def set_state_hook(hook_dir):
-    """Path to set_state.sh hook."""
-    return hook_dir / "set_state.sh"
+    """Path to waggle_set_state.sh hook."""
+    return hook_dir / "waggle_set_state.sh"
 
 
 # ========== Test Helper Functions ==========
@@ -65,10 +65,10 @@ def run_set_state_hook(
     env: Optional[dict] = None
 ) -> subprocess.CompletedProcess:
     """
-    Run set_state.sh hook script with mocked dependencies.
-    
+    Run waggle_set_state.sh hook script with mocked dependencies.
+
     Args:
-        hook_path: Path to the set_state.sh script
+        hook_path: Path to the waggle_set_state.sh script
         state: State string to pass as argument
         tmux_session: Mocked tmux session name
         session_id: Mocked tmux session ID
@@ -511,7 +511,7 @@ class TestSilentErrorHandling:
 
 
 class TestSetStateHook:
-    """Tests for set_state.sh parameterized state hook."""
+    """Tests for waggle_set_state.sh parameterized state hook."""
     
     def test_hook_accepts_custom_state_parameter(
         self, set_state_hook, temp_home, db_path
@@ -768,7 +768,7 @@ class TestSetStateHook:
 
 
 class TestAgentTypeGating:
-    """Tests for CLAUDE_CODE_AGENT_TYPE gating in set_state.sh."""
+    """Tests for CLAUDE_CODE_AGENT_TYPE gating in waggle_set_state.sh."""
 
     def test_db_write_when_agent_type_unset(
         self, set_state_hook, temp_home, db_path

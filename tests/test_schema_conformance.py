@@ -1,6 +1,6 @@
 """Schema conformance tests to detect drift between schema.sql and hook DDL.
 
-Ensures hooks/set_state.sh stays in sync with src/waggle/schema.sql.
+Ensures hooks/waggle_set_state.sh stays in sync with src/waggle/schema.sql.
 """
 
 import re
@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 def test_hook_schema_matches_canonical():
-    """Verify hooks/set_state.sh DDL matches src/waggle/schema.sql."""
+    """Verify hooks/waggle_set_state.sh DDL matches src/waggle/schema.sql."""
     # Read canonical schema
     schema_path = Path(__file__).parent.parent / "src" / "waggle" / "schema.sql"
     canonical_ddl = schema_path.read_text()
@@ -17,7 +17,7 @@ def test_hook_schema_matches_canonical():
     canonical_columns = extract_columns(canonical_ddl)
     
     # Read hook script
-    hook_path = Path(__file__).parent.parent / "hooks" / "set_state.sh"
+    hook_path = Path(__file__).parent.parent / "hooks" / "waggle_set_state.sh"
     hook_script = hook_path.read_text()
     
     # Extract CREATE TABLE from hook

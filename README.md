@@ -20,25 +20,50 @@ Uses hook-driven state updates to track whether agents are working or waiting fo
 ```bash
 git clone https://github.com/gabemahoney/waggle.git
 cd waggle
+```
+
+Claude Code users: run `./install.sh` (handles poetry install and full setup — see Quick Start).
+
+OpenCode / manual users:
+```bash
 poetry install
 ```
 
 ## Quick Start
 
-**Install hook scripts (required for both Claude Code and OpenCode):**
-
-```bash
-mkdir -p ~/.waggle/hooks
-cp hooks/set_state.sh ~/.waggle/hooks/
-chmod +x ~/.waggle/hooks/*.sh
-```
-
 <details>
 <summary><strong>Claude Code Setup</strong></summary>
 
-**1. Configure MCP Server**
+**1. Run the installer**
 
-This will allow you to use the MCP server in Claude Code.
+From the waggle project root:
+
+```bash
+./install.sh
+```
+
+This handles everything: installs Python dependencies, registers the MCP server, deploys hook scripts, and configures `~/.claude/settings.json`.
+
+**2. Verify Setup**
+
+```bash
+claude mcp list
+```
+
+**Uninstall**
+
+```bash
+./install.sh --uninstall
+```
+
+Removes the MCP server registration and waggle hooks from `~/.claude/settings.json`. Does not remove `~/.waggle/`.
+
+<details>
+<summary><strong>Advanced Usage / Manual Setup</strong></summary>
+
+These are the steps `install.sh` performs internally, if you prefer to configure manually.
+
+**Register MCP Server**
 
 Add to `~/.claude.json`:
 ```json
@@ -55,7 +80,7 @@ Add to `~/.claude.json`:
 
 **Note:** Replace `/path/to/waggle` with the absolute path to your waggle installation.
 
-**2. Configure Claude Hooks**
+**Configure Claude Hooks**
 
 This will allow your Claude Code sessions to register their state in the database.
 **Note**: You can change the `waiting` and `working` params to any state string you like.
@@ -66,29 +91,29 @@ Add to `~/.claude/settings.json`:
 {
   "hooks": {
     "SessionStart": [
-      { "hooks": [{ "type": "command", "command": "~/.waggle/hooks/set_state.sh waiting" }] }
+      { "hooks": [{ "type": "command", "command": "~/.waggle/hooks/waggle_set_state.sh waiting" }] }
     ],
     "UserPromptSubmit": [
-      { "hooks": [{ "type": "command", "command": "~/.waggle/hooks/set_state.sh working" }] }
+      { "hooks": [{ "type": "command", "command": "~/.waggle/hooks/waggle_set_state.sh working" }] }
     ],
     "PreToolUse": [
-      { "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "~/.waggle/hooks/set_state.sh waiting" }] },
-      { "matcher": "^(?!AskUserQuestion$).*", "hooks": [{ "type": "command", "command": "~/.waggle/hooks/set_state.sh working" }] }
+      { "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "~/.waggle/hooks/waggle_set_state.sh waiting" }] },
+      { "matcher": "^(?!AskUserQuestion$).*", "hooks": [{ "type": "command", "command": "~/.waggle/hooks/waggle_set_state.sh working" }] }
     ],
     "PostToolUse": [
-      { "hooks": [{ "type": "command", "command": "~/.waggle/hooks/set_state.sh working" }] }
+      { "hooks": [{ "type": "command", "command": "~/.waggle/hooks/waggle_set_state.sh working" }] }
     ],
     "PermissionRequest": [
-      { "matcher": "*", "hooks": [{ "type": "command", "command": "~/.waggle/hooks/set_state.sh waiting" }] }
+      { "matcher": "*", "hooks": [{ "type": "command", "command": "~/.waggle/hooks/waggle_set_state.sh waiting" }] }
     ],
     "Stop": [
-      { "hooks": [{ "type": "command", "command": "~/.waggle/hooks/set_state.sh waiting" }] }
+      { "hooks": [{ "type": "command", "command": "~/.waggle/hooks/waggle_set_state.sh waiting" }] }
     ],
     "Notification": [
-      { "matcher": "*", "hooks": [{ "type": "command", "command": "~/.waggle/hooks/set_state.sh waiting" }] }
+      { "matcher": "*", "hooks": [{ "type": "command", "command": "~/.waggle/hooks/waggle_set_state.sh waiting" }] }
     ],
     "SessionEnd": [
-      { "hooks": [{ "type": "command", "command": "~/.waggle/hooks/set_state.sh --delete" }] }
+      { "hooks": [{ "type": "command", "command": "~/.waggle/hooks/waggle_set_state.sh --delete" }] }
     ]
   }
 }
@@ -96,11 +121,7 @@ Add to `~/.claude/settings.json`:
 
 Restart Claude Code after modifying configuration.
 
-**3. Verify Setup**
-
-```bash
-claude mcp list
-```
+</details>
 
 </details>
 
