@@ -32,7 +32,6 @@ ENV PATH="/root/.local/bin:$PATH"
 
 # Install pipx via pip (use --break-system-packages for Ubuntu 24.04)
 RUN pip install --break-system-packages pipx
-ENV PATH="/root/.local/bin:/home/waggle/.local/bin:$PATH"
 
 # Install bees CLI via pipx as root first, then we'll set up user
 RUN PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin pipx install 'bees-md[serve]'
@@ -43,9 +42,9 @@ RUN useradd -m -u 1000 -s /bin/bash waggle
 # Copy waggle source (from rsync-staged build context)
 COPY --chown=waggle:waggle . /opt/waggle
 
-# Install Poetry for waggle user and set PATH
+# Install Poetry for waggle user
 RUN curl -sSL https://install.python-poetry.org | su waggle -c "python3 -"
-ENV PATH="/home/waggle/.local/bin:$PATH"
+ENV PATH="/home/waggle/.local/bin:/root/.local/bin:$PATH"
 
 # Copy container scripts
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh

@@ -1,17 +1,21 @@
 #!/bin/bash
 # phase2.sh — Phase 2 MCP integration test runner inside waggle-ci-2
-set -euo pipefail
+set -uo pipefail
+
+EXIT_CODE=0
+
+finish() {
+  echo "$EXIT_CODE" > /tmp/waggle_phase_exit
+  exit "$EXIT_CODE"
+}
 
 echo "=== WAGGLE CI PHASE 2 ==="
 
-# Bypass Claude onboarding
+# Bypass Claude onboarding and set up ~/.claude/
 mkdir -p "${HOME}/.claude"
 cat > "${HOME}/.claude.json" <<'CLAUDEJSON'
 {"numStartups":100,"hasCompletedOnboarding":true,"mcpServers":{},"projects":{"/opt/waggle":{"hasTrustDialogAccepted":true}}}
 CLAUDEJSON
-
-# Set up waggle hooks in settings.json so hooks fire during tests
-mkdir -p "${HOME}/.claude"
 cat > "${HOME}/.claude/settings.json" <<'SETTINGS'
 {
   "hooks": {
@@ -73,6 +77,14 @@ claude mcp list
 echo "--- Starting auto_approve.sh ---"
 /opt/waggle/docker/auto_approve.sh ci > /tmp/auto_approve.log 2>&1 &
 
-# Launch release-test skill in tmux session 'ci'
+# Launch release-test skill — capture exit code for entrypoint.sh
 echo "--- Launching release-test ---"
-exec claude "/release-test"
+claude "/release-test" || EXIT_CODE=$?
+
+if [[ $EXIT_CODE -eq 0 ]]; then
+  echo "WAGGLE CI PHASE 2 PASSED"
+else
+  echo "FAIL: release-test exited with code $EXIT_CODE" >&2
+fi
+
+finish
