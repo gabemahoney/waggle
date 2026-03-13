@@ -39,8 +39,8 @@ yarn-error.log*
 .env
 .env.local
 
-# Local scripts
-auto_approve.sh
+# Local scripts (root-level only, not in docker/)
+/auto_approve.sh
 
 # Claude (ignore personal config, track skills)
 .claude/*

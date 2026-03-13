@@ -116,20 +116,67 @@ If `EXIT_CODE` is `0`:
 echo "WAGGLE CI PHASE 1 PASSED"
 ```
 
-### Step 10 — Phase 2 (added in Epic t1.u9d.1w)
+### Step 10 — Start Phase 2 container
 
-Phase 2 will be added here after Epic t1.u9d.1w is complete.
+```bash
+TESTPLANS_PATH="$WAGGLE_ROOT/tickets/testplans"
+docker run -d \
+  --name waggle-ci-2 \
+  -e ANTHROPIC_API_KEY="$CLAUDE_API_KEY" \
+  -e PHASE=2 \
+  -v "$TESTPLANS_PATH:/tmp/testplans_host:ro" \
+  waggle-ci
+```
 
-After all phases pass:
+### Step 11 — Create host tmux session for Phase 2 observation
+
+```bash
+tmux new-session -d -s waggle-ci-2 "docker exec -it -u waggle waggle-ci-2 tmux attach -t ci; read"
+echo "Attach with: tmux attach -t waggle-ci-2"
+```
+
+### Step 12 — Wait for Phase 2 to complete
+
+Poll until the container exits:
+
+```bash
+while true; do
+  STATUS=$(docker inspect waggle-ci-2 --format '{{.State.Status}}' 2>/dev/null || echo "error")
+  if [[ "$STATUS" == "exited" || "$STATUS" == "error" ]]; then
+    break
+  fi
+  sleep 2
+done
+EXIT_CODE=$(docker inspect waggle-ci-2 --format '{{.State.ExitCode}}' 2>/dev/null || echo "1")
+```
+
+### Step 13 — Handle Phase 2 result
+
+If `EXIT_CODE` is not `0`:
+```bash
+echo "WAGGLE CI PHASE 2 FAILED"
+docker logs waggle-ci-2 2>&1 | tail -30
+```
+Then proceed to cleanup (Step 15) and stop.
+
+If `EXIT_CODE` is `0`:
+```bash
+echo "WAGGLE CI PHASE 2 PASSED"
+```
+
+### Step 14 — Final message
+
+Only after both phases pass:
 ```bash
 echo "All phases passed."
 ```
 
-### Step 11 — Cleanup
+### Step 15 — Cleanup
 
 Always run cleanup regardless of success or failure:
 
 ```bash
-docker rm -f waggle-ci-1 2>/dev/null || true
+docker rm -f waggle-ci-1 waggle-ci-2 2>/dev/null || true
 tmux kill-session -t waggle-ci-1 2>/dev/null || true
+tmux kill-session -t waggle-ci-2 2>/dev/null || true
 ```
