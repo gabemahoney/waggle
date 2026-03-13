@@ -18,15 +18,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libffi-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Node.js LTS via NodeSource
-RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
+# Install Node.js 20 LTS via NodeSource (pinned major version)
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Claude CLI
 RUN npm install -g @anthropic-ai/claude-code
 
-# Install Poetry via official installer
+# Install Poetry via official installer (pinned version)
+ENV POETRY_VERSION=1.8.3
 RUN curl -sSL https://install.python-poetry.org | python3 -
 ENV PATH="/root/.local/bin:$PATH"
 
