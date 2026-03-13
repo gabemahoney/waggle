@@ -29,7 +29,7 @@ poetry install
 
 ```bash
 mkdir -p ~/.waggle/hooks
-cp hooks/set_state.sh ~/.waggle/hooks/
+cp hooks/waggle_set_state.sh ~/.waggle/hooks/
 chmod +x ~/.waggle/hooks/*.sh
 ```
 
@@ -66,29 +66,29 @@ Add to `~/.claude/settings.json`:
 {
   "hooks": {
     "SessionStart": [
-      { "hooks": [{ "type": "command", "command": "~/.waggle/hooks/set_state.sh waiting" }] }
+      { "hooks": [{ "type": "command", "command": "~/.waggle/hooks/waggle_set_state.sh waiting" }] }
     ],
     "UserPromptSubmit": [
-      { "hooks": [{ "type": "command", "command": "~/.waggle/hooks/set_state.sh working" }] }
+      { "hooks": [{ "type": "command", "command": "~/.waggle/hooks/waggle_set_state.sh working" }] }
     ],
     "PreToolUse": [
-      { "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "~/.waggle/hooks/set_state.sh waiting" }] },
-      { "matcher": "^(?!AskUserQuestion$).*", "hooks": [{ "type": "command", "command": "~/.waggle/hooks/set_state.sh working" }] }
+      { "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "~/.waggle/hooks/waggle_set_state.sh waiting" }] },
+      { "matcher": "^(?!AskUserQuestion$).*", "hooks": [{ "type": "command", "command": "~/.waggle/hooks/waggle_set_state.sh working" }] }
     ],
     "PostToolUse": [
-      { "hooks": [{ "type": "command", "command": "~/.waggle/hooks/set_state.sh working" }] }
+      { "hooks": [{ "type": "command", "command": "~/.waggle/hooks/waggle_set_state.sh working" }] }
     ],
     "PermissionRequest": [
-      { "matcher": "*", "hooks": [{ "type": "command", "command": "~/.waggle/hooks/set_state.sh waiting" }] }
+      { "matcher": "*", "hooks": [{ "type": "command", "command": "~/.waggle/hooks/waggle_set_state.sh waiting" }] }
     ],
     "Stop": [
-      { "hooks": [{ "type": "command", "command": "~/.waggle/hooks/set_state.sh waiting" }] }
+      { "hooks": [{ "type": "command", "command": "~/.waggle/hooks/waggle_set_state.sh waiting" }] }
     ],
     "Notification": [
-      { "matcher": "*", "hooks": [{ "type": "command", "command": "~/.waggle/hooks/set_state.sh waiting" }] }
+      { "matcher": "*", "hooks": [{ "type": "command", "command": "~/.waggle/hooks/waggle_set_state.sh waiting" }] }
     ],
     "SessionEnd": [
-      { "hooks": [{ "type": "command", "command": "~/.waggle/hooks/set_state.sh --delete" }] }
+      { "hooks": [{ "type": "command", "command": "~/.waggle/hooks/waggle_set_state.sh --delete" }] }
     ]
   }
 }

@@ -10,7 +10,7 @@ from typing import Dict, Any
 
 
 # Default database path for agent state storage.
-# NOTE: This constant is also used in hooks/set_state.sh:15
+# NOTE: This constant is also used in hooks/waggle_set_state.sh:15
 # Both locations must be kept in sync if the path changes.
 def _get_default_db_path() -> Path:
     """Get default database path. Computed lazily to support testing with mocked Path.home()."""

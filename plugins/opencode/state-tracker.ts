@@ -2,7 +2,7 @@
  * OpenCode State Tracker Plugin
  * 
  * Tracks OpenCode session state changes and reports them to the waggle state database
- * by calling $HOME/.waggle/hooks/set_state.sh with state strings.
+ * by calling $HOME/.waggle/hooks/waggle_set_state.sh with state strings.
  * 
  * Configuration:
  * - Can be configured via environment variables:
@@ -17,14 +17,14 @@
 import type { Plugin } from "@opencode-ai/plugin"
 
 /**
- * Call set_state.sh with state string
+ * Call waggle_set_state.sh with state string
  * The script automatically extracts namespace from pwd and session info from tmux
  */
 async function setState($: any, state: string): Promise<void> {
   try {
-    await $`$HOME/.waggle/hooks/set_state.sh ${state}`
+    await $`$HOME/.waggle/hooks/waggle_set_state.sh ${state}`
   } catch (error) {
-    console.error(`[waggle state-tracker] Error calling set_state.sh:`, error)
+    console.error(`[waggle state-tracker] Error calling waggle_set_state.sh:`, error)
   }
 }
 
