@@ -37,8 +37,8 @@ RUN pip install --break-system-packages pipx
 # Install bees CLI via pipx as root first, then we'll set up user
 RUN PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin pipx install 'bees-md[serve]'
 
-# Create non-root waggle user (UID 1000)
-RUN useradd -m -u 1000 -s /bin/bash waggle
+# Create non-root waggle user (UID 1001 to avoid collision with ubuntu:24.04's ubuntu user)
+RUN useradd -m -u 1001 -s /bin/bash waggle
 
 # Copy waggle source (from rsync-staged build context)
 COPY --chown=waggle:waggle . /opt/waggle
