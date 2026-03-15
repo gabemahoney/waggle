@@ -957,6 +957,7 @@ class TestCreateSessionSync:
             session_name="my-agent",
             start_directory="/home/user/repo",
             attach=False,
+            environment={"VIRTUAL_ENV": "", "VIRTUAL_ENV_PROMPT": ""},
         )
 
     @patch("waggle.tmux.libtmux.Server")
