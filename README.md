@@ -1,11 +1,21 @@
 # Waggle
 
-MCP server for tracking and managing async agent state in tmux sessions.
+CLI tool and MCP server for tracking and managing async agent state in tmux sessions.
 
 ## Overview
 
-Waggle enables LLM orchestrators to monitor and control Claude and OpenCode LLM sessions running inside tmux.
+Waggle is a CLI tool with subcommands for managing LLM agent lifecycles. It enables LLM orchestrators to monitor and control Claude and OpenCode LLM sessions running inside tmux.
 Uses hook-driven state updates to track whether agents are working or waiting for input, and provides tools to spawn, interact with, and close sessions.
+
+### CLI Usage
+
+The `waggle` binary is a dispatcher with the following subcommands:
+
+| Command | Description |
+|---------|-------------|
+| `waggle serve` | Start the Waggle MCP server (stdio transport) |
+
+Running `waggle` with no subcommand prints help.
 
 ## Installation
 
@@ -27,6 +37,14 @@ Claude Code users: run `./install.sh` (handles poetry install and full setup —
 OpenCode / manual users:
 ```bash
 poetry install
+```
+
+**Alternative install methods:**
+
+```bash
+pipx install waggle
+# or
+uv tool install waggle
 ```
 
 ## Quick Start
@@ -72,7 +90,7 @@ Add to `~/.claude.json`:
     "waggle": {
       "type": "stdio",
       "command": "poetry",
-      "args": ["run", "--directory", "/path/to/waggle", "waggle"]
+      "args": ["run", "--directory", "/path/to/waggle", "waggle", "serve"]
     }
   }
 }
@@ -138,7 +156,7 @@ Add to `~/.opencode/opencode.json`:
   "mcp": {
     "waggle": {
       "type": "local",
-      "command": ["poetry", "run", "--directory", "/path/to/waggle", "waggle"]
+      "command": ["poetry", "run", "--directory", "/path/to/waggle", "waggle", "serve"]
     }
   }
 }
@@ -362,12 +380,13 @@ Remove all waggle DB entries for a specific repository path. Use to clean up sta
 
 ## Architecture
 
-Waggle has 4 components:
+Waggle has 5 components:
 
-1. **MCP Server** (`src/waggle/server.py`) — Provides 6 tools: `list_agents`, `spawn_agent`, `read_pane`, `send_command`, `close_session`, `delete_repo_agents`
-2. **SQLite Database** — Persistent agent state tracking with session identity keys (`session_name+session_id+session_created`)
-3. **tmux Sessions** (`src/waggle/tmux.py`) — libtmux wrappers for session management, agent launch, pane interaction
-4. **State Tracking Integration** — Auto-update database on agent state changes
+1. **CLI Dispatcher** (`src/waggle/cli.py`) — Entry point for the `waggle` binary; routes subcommands (e.g. `waggle serve`) to internal modules
+2. **MCP Server** (`src/waggle/server.py`) — Provides 6 tools: `list_agents`, `spawn_agent`, `read_pane`, `send_command`, `close_session`, `delete_repo_agents`
+3. **SQLite Database** — Persistent agent state tracking with session identity keys (`session_name+session_id+session_created`)
+4. **tmux Sessions** (`src/waggle/tmux.py`) — libtmux wrappers for session management, agent launch, pane interaction
+5. **State Tracking Integration** — Auto-update database on agent state changes
    - **Claude Code**: Bash hooks called on session lifecycle events
    - **OpenCode**: TypeScript plugin responds to session events
 

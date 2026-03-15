@@ -99,7 +99,7 @@ if ! command -v claude &>/dev/null; then
 fi
 
 echo "Registering waggle MCP server..."
-claude mcp add --transport stdio --scope user waggle -- poetry run --directory "$SCRIPT_DIR" waggle
+claude mcp add --transport stdio --scope user waggle -- poetry run --directory "$SCRIPT_DIR" waggle serve
 echo "Waggle MCP server registered."
 
 # ---------------------------------------------------------------------------
