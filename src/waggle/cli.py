@@ -108,7 +108,6 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Exit silently if waggle MCP is detected, otherwise print CLI reference"
     )
-    sting_parser.set_defaults(func=lambda args: None)
 
     args = parser.parse_args()
 
