@@ -178,6 +178,64 @@ test_uv_install() {
 }
 
 # ============================================================================
+# Lifecycle subcommand tests
+# ============================================================================
+
+test_list_agents_help() {
+    CURRENT_TEST="test_list_agents_help"
+    capture_cmd poetry run --directory "$REPO" waggle list-agents --help
+    assert_eq "$CMD_EXIT" "0" "$CURRENT_TEST"
+    pass_test "$CURRENT_TEST"
+}
+
+test_spawn_agent_help() {
+    CURRENT_TEST="test_spawn_agent_help"
+    capture_cmd poetry run --directory "$REPO" waggle spawn-agent --help
+    assert_eq "$CMD_EXIT" "0" "$CURRENT_TEST"
+    pass_test "$CURRENT_TEST"
+}
+
+test_close_session_help() {
+    CURRENT_TEST="test_close_session_help"
+    capture_cmd poetry run --directory "$REPO" waggle close-session --help
+    assert_eq "$CMD_EXIT" "0" "$CURRENT_TEST"
+    pass_test "$CURRENT_TEST"
+}
+
+test_delete_repo_agents_help() {
+    CURRENT_TEST="test_delete_repo_agents_help"
+    capture_cmd poetry run --directory "$REPO" waggle delete-repo-agents --help
+    assert_eq "$CMD_EXIT" "0" "$CURRENT_TEST"
+    pass_test "$CURRENT_TEST"
+}
+
+test_list_agents_returns_json() {
+    CURRENT_TEST="test_list_agents_returns_json"
+    capture_cmd poetry run --directory "$REPO" waggle list-agents
+    if [[ "$CMD_EXIT" -eq 2 ]]; then
+        fail_test "$CURRENT_TEST" "exit code was 2 (usage error)"
+    fi
+    assert_contains "$CMD_OUT" '"status"' "$CURRENT_TEST"
+    pass_test "$CURRENT_TEST"
+}
+
+test_spawn_agent_missing_args_json() {
+    CURRENT_TEST="test_spawn_agent_missing_args_json"
+    capture_cmd poetry run --directory "$REPO" waggle spawn-agent
+    assert_eq "$CMD_EXIT" "2" "$CURRENT_TEST"
+    assert_contains "$CMD_OUT" '"status"' "$CURRENT_TEST"
+    pass_test "$CURRENT_TEST"
+}
+
+test_close_session_missing_args_json() {
+    CURRENT_TEST="test_close_session_missing_args_json"
+    capture_cmd poetry run --directory "$REPO" waggle close-session
+    assert_eq "$CMD_EXIT" "2" "$CURRENT_TEST"
+    assert_contains "$CMD_OUT" '"status"' "$CURRENT_TEST"
+    pass_test "$CURRENT_TEST"
+}
+
+# ============================================================================
 # Run all tests
 # ============================================================================
 
@@ -196,6 +254,15 @@ run_test test_waggle_usage_error_json
 # Package manager tests
 run_test test_pipx_install
 run_test test_uv_install
+
+# Lifecycle subcommand tests
+run_test test_list_agents_help
+run_test test_spawn_agent_help
+run_test test_close_session_help
+run_test test_delete_repo_agents_help
+run_test test_list_agents_returns_json
+run_test test_spawn_agent_missing_args_json
+run_test test_close_session_missing_args_json
 
 # ============================================================================
 # Summary
