@@ -31,8 +31,8 @@ ENV POETRY_VERSION=1.8.3
 RUN curl -sSL https://install.python-poetry.org | python3 -
 ENV PATH="/root/.local/bin:$PATH"
 
-# Install pipx via pip (use --break-system-packages for Ubuntu 24.04)
-RUN pip install --break-system-packages pipx
+# Install pipx and uv via pip (use --break-system-packages for Ubuntu 24.04)
+RUN pip install --break-system-packages pipx uv
 
 # Install bees CLI via pipx as root first, then we'll set up user
 RUN PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin pipx install 'bees-md[serve]'
