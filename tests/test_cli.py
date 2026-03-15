@@ -57,32 +57,19 @@ class TestUsageErrors:
 
 
 class TestListAgents:
-    def test_list_agents_defaults(self, monkeypatch):
-        monkeypatch.setattr(sys, "argv", ["waggle", "list-agents"])
+    @pytest.mark.parametrize("argv,expected_kwargs", [
+        (["waggle", "list-agents"], {"name": None, "repo": None, "ctx": None}),
+        (["waggle", "list-agents", "--name", "foo", "--repo", "/bar"], {"name": "foo", "repo": "/bar", "ctx": None}),
+        (["waggle", "list-agents", "--name", "foo"], {"name": "foo", "repo": None, "ctx": None}),
+    ])
+    def test_list_agents_args(self, monkeypatch, argv, expected_kwargs):
+        monkeypatch.setattr(sys, "argv", argv)
         with patch("waggle.server.list_agents", new_callable=AsyncMock) as mock_fn:
             mock_fn.return_value = {"status": "success", "agents": []}
             with pytest.raises(SystemExit) as exc:
                 main()
             assert exc.value.code == 0
-            mock_fn.assert_called_once_with(name=None, repo=None, ctx=None)
-
-    def test_list_agents_filters(self, monkeypatch):
-        monkeypatch.setattr(sys, "argv", ["waggle", "list-agents", "--name", "foo", "--repo", "/bar"])
-        with patch("waggle.server.list_agents", new_callable=AsyncMock) as mock_fn:
-            mock_fn.return_value = {"status": "success", "agents": []}
-            with pytest.raises(SystemExit) as exc:
-                main()
-            assert exc.value.code == 0
-            mock_fn.assert_called_once_with(name="foo", repo="/bar", ctx=None)
-
-    def test_list_agents_passes_args(self, monkeypatch):
-        monkeypatch.setattr(sys, "argv", ["waggle", "list-agents", "--name", "foo"])
-        with patch("waggle.server.list_agents", new_callable=AsyncMock) as mock_fn:
-            mock_fn.return_value = {"status": "success", "agents": []}
-            with pytest.raises(SystemExit) as exc:
-                main()
-            assert exc.value.code == 0
-            mock_fn.assert_called_once_with(name="foo", repo=None, ctx=None)
+            mock_fn.assert_called_once_with(**expected_kwargs)
 
 
 class TestSpawnAgent:
