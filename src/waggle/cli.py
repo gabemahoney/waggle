@@ -101,6 +101,15 @@ def main():
     send_cmd_parser.add_argument("--pane-id", default=None, help="Pane ID (default: active pane)")
     send_cmd_parser.add_argument("--custom-text", default=None, help="Free-form text for 'Type something.' option")
 
+    # waggle sting
+    sting_parser = subparsers.add_parser(
+        "sting",
+        help="Emit waggle CLI reference if waggle MCP is not configured",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="Exit silently if waggle MCP is detected, otherwise print CLI reference"
+    )
+    sting_parser.set_defaults(func=lambda args: None)
+
     args = parser.parse_args()
 
     if args.subcommand is None:
@@ -152,3 +161,6 @@ def main():
         result = asyncio.run(waggle.server.send_command(args.session_id, args.command, args.pane_id, args.custom_text))
         print(json.dumps(result))
         sys.exit(0 if result.get("status") == "success" else 1)
+    elif args.subcommand == "sting":
+        from waggle.sting import handle_sting
+        handle_sting(args)

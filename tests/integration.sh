@@ -270,6 +270,25 @@ test_send_command_missing_args_json() {
 }
 
 # ============================================================================
+# Sting subcommand tests
+# ============================================================================
+
+test_waggle_help_all_subcommands() {
+    CURRENT_TEST="test_waggle_help_all_subcommands"
+    capture_cmd poetry run --directory "$REPO" waggle --help
+    assert_eq "$CMD_EXIT" "0" "$CURRENT_TEST"
+    assert_contains "$CMD_OUT" "serve" "$CURRENT_TEST"
+    assert_contains "$CMD_OUT" "list-agents" "$CURRENT_TEST"
+    assert_contains "$CMD_OUT" "spawn-agent" "$CURRENT_TEST"
+    assert_contains "$CMD_OUT" "close-session" "$CURRENT_TEST"
+    assert_contains "$CMD_OUT" "delete-repo-agents" "$CURRENT_TEST"
+    assert_contains "$CMD_OUT" "read-pane" "$CURRENT_TEST"
+    assert_contains "$CMD_OUT" "send-command" "$CURRENT_TEST"
+    assert_contains "$CMD_OUT" "sting" "$CURRENT_TEST"
+    pass_test "$CURRENT_TEST"
+}
+
+# ============================================================================
 # Run all tests
 # ============================================================================
 
@@ -303,6 +322,9 @@ run_test test_read_pane_help
 run_test test_send_command_help
 run_test test_read_pane_missing_session_json
 run_test test_send_command_missing_args_json
+
+# Sting subcommand tests
+run_test test_waggle_help_all_subcommands
 
 # ============================================================================
 # Summary
