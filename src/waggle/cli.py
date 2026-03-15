@@ -6,6 +6,12 @@ import sys
 _SHELL_INJECT_RE = re.compile(r'[;&|`$(){}\\<>\'"!]')
 
 
+def _call(fn_or_tool, *args, **kwargs):
+    """Call a function or an MCP FunctionTool (via .fn)."""
+    fn = fn_or_tool if callable(fn_or_tool) else fn_or_tool.fn
+    return fn(*args, **kwargs)
+
+
 def _safe_model(value):
     """Reject model names containing shell metacharacters."""
     if _SHELL_INJECT_RE.search(value):
@@ -120,7 +126,7 @@ def main():
     elif args.subcommand == "list-agents":
         import asyncio
         import waggle.server
-        result = asyncio.run(waggle.server.list_agents(name=args.name, repo=args.repo, ctx=None))
+        result = asyncio.run(_call(waggle.server.list_agents, name=args.name, repo=args.repo, ctx=None))
         print(json.dumps(result))
         sys.exit(0 if result.get("status") == "success" else 1)
     elif args.subcommand == "delete-repo-agents":
@@ -128,13 +134,13 @@ def main():
         import os
         import waggle.server
         repo_root = args.repo_root if args.repo_root else os.getcwd()
-        result = asyncio.run(waggle.server.delete_repo_agents(repo_root=repo_root, ctx=None))
+        result = asyncio.run(_call(waggle.server.delete_repo_agents, repo_root=repo_root, ctx=None))
         print(json.dumps(result))
         sys.exit(0 if result.get("status") == "success" else 1)
     elif args.subcommand == "spawn-agent":
         import asyncio
         import waggle.server
-        result = asyncio.run(waggle.server.spawn_agent(
+        result = asyncio.run(_call(waggle.server.spawn_agent,
             args.repo, args.session_name, args.agent,
             model=args.model, command=args.command, settings=args.settings, ctx=None
         ))
@@ -143,7 +149,7 @@ def main():
     elif args.subcommand == "close-session":
         import asyncio
         import waggle.server
-        result = asyncio.run(waggle.server.close_session(
+        result = asyncio.run(_call(waggle.server.close_session,
             args.session_id, session_name=args.session_name, force=args.force
         ))
         print(json.dumps(result))
@@ -151,13 +157,13 @@ def main():
     elif args.subcommand == "read-pane":
         import asyncio
         import waggle.server
-        result = asyncio.run(waggle.server.read_pane(args.session_id, args.pane_id, args.scrollback))
+        result = asyncio.run(_call(waggle.server.read_pane, args.session_id, args.pane_id, args.scrollback))
         print(json.dumps(result))
         sys.exit(0 if result.get("status") == "success" else 1)
     elif args.subcommand == "send-command":
         import asyncio
         import waggle.server
-        result = asyncio.run(waggle.server.send_command(args.session_id, args.command, args.pane_id, args.custom_text))
+        result = asyncio.run(_call(waggle.server.send_command, args.session_id, args.command, args.pane_id, args.custom_text))
         print(json.dumps(result))
         sys.exit(0 if result.get("status") == "success" else 1)
     elif args.subcommand == "sting":

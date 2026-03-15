@@ -305,11 +305,21 @@ test_sting_silent_when_configured() {
 }
 
 test_sting_prints_reference_when_not_configured() {
-    # Run with a temp HOME that has no waggle MCP config
+    # Run waggle sting with a temp HOME that has no waggle MCP config.
+    # Use the venv binary directly so HOME override doesn't trigger poetry
+    # virtualenv recreation in the temp directory.
     CURRENT_TEST="test_sting_prints_reference_when_not_configured"
-    local temp_home
+    local temp_home venv_path waggle_bin
     temp_home=$(mktemp -d)
-    capture_cmd env HOME="$temp_home" poetry run --directory "$REPO" waggle sting
+    venv_path=$(poetry env info --directory "$REPO" --path 2>/dev/null || true)
+    waggle_bin="$venv_path/bin/waggle"
+    if [[ ! -f "$waggle_bin" ]]; then
+        fail_test "$CURRENT_TEST" "waggle venv binary not found at $waggle_bin"
+        rm -rf "$temp_home"
+        pass_test "$CURRENT_TEST"
+        return
+    fi
+    capture_cmd env HOME="$temp_home" "$waggle_bin" sting
     assert_eq "$CMD_EXIT" "0" "$CURRENT_TEST"
     assert_contains "$CMD_OUT" "serve" "$CURRENT_TEST"
     rm -rf "$temp_home"
