@@ -78,6 +78,29 @@ def main():
     close_parser.add_argument("--session-name", help="Optional session name to validate against")
     close_parser.add_argument("--force", action="store_true", help="Close even if an LLM agent is actively running")
 
+    # waggle read-pane
+    read_pane_parser = subparsers.add_parser(
+        "read-pane",
+        help="Read content from an agent's tmux pane",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="Read pane content from a tmux session and detect agent state"
+    )
+    read_pane_parser.add_argument("--session-id", required=True, help="tmux session ID (e.g. $1)")
+    read_pane_parser.add_argument("--pane-id", default=None, help="Pane ID (default: active pane)")
+    read_pane_parser.add_argument("--scrollback", type=int, default=50, help="Lines of scrollback to capture (default: 50)")
+
+    # waggle send-command
+    send_cmd_parser = subparsers.add_parser(
+        "send-command",
+        help="Send a command to an agent's tmux pane",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="Send a command or option number to a tmux session"
+    )
+    send_cmd_parser.add_argument("--session-id", required=True, help="tmux session ID (e.g. $1)")
+    send_cmd_parser.add_argument("--command", required=True, help="Command text or option number to send")
+    send_cmd_parser.add_argument("--pane-id", default=None, help="Pane ID (default: active pane)")
+    send_cmd_parser.add_argument("--custom-text", default=None, help="Free-form text for 'Type something.' option")
+
     args = parser.parse_args()
 
     if args.subcommand is None:
@@ -115,5 +138,17 @@ def main():
         result = asyncio.run(waggle.server.close_session(
             args.session_id, session_name=args.session_name, force=args.force
         ))
+        print(json.dumps(result))
+        sys.exit(0 if result.get("status") == "success" else 1)
+    elif args.subcommand == "read-pane":
+        import asyncio
+        import waggle.server
+        result = asyncio.run(waggle.server.read_pane(args.session_id, args.pane_id, args.scrollback))
+        print(json.dumps(result))
+        sys.exit(0 if result.get("status") == "success" else 1)
+    elif args.subcommand == "send-command":
+        import asyncio
+        import waggle.server
+        result = asyncio.run(waggle.server.send_command(args.session_id, args.command, args.pane_id, args.custom_text))
         print(json.dumps(result))
         sys.exit(0 if result.get("status") == "success" else 1)
