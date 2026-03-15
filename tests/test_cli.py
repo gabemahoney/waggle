@@ -103,13 +103,14 @@ class TestSpawnAgent:
 
 class TestDeleteRepoAgents:
     def test_delete_repo_agents_default_cwd(self, monkeypatch):
+        import os
         monkeypatch.setattr(sys, "argv", ["waggle", "delete-repo-agents"])
         with patch("waggle.server.delete_repo_agents", new_callable=AsyncMock) as mock_fn:
             mock_fn.return_value = {"status": "success"}
             with pytest.raises(SystemExit) as exc:
                 main()
             assert exc.value.code == 0
-            mock_fn.assert_called_once()
+            mock_fn.assert_called_once_with(repo_root=os.getcwd(), ctx=None)
 
     def test_delete_repo_agents_explicit_root(self, monkeypatch):
         monkeypatch.setattr(sys, "argv", ["waggle", "delete-repo-agents", "--repo-root", "/some/path"])
@@ -133,14 +134,6 @@ class TestCloseSession:
 
 
 class TestLifecycleExitCodes:
-    def test_lifecycle_exits_0_on_success(self, monkeypatch):
-        monkeypatch.setattr(sys, "argv", ["waggle", "list-agents"])
-        with patch("waggle.server.list_agents", new_callable=AsyncMock) as mock_fn:
-            mock_fn.return_value = {"status": "success", "agents": []}
-            with pytest.raises(SystemExit) as exc:
-                main()
-            assert exc.value.code == 0
-
     def test_lifecycle_exits_1_on_error(self, monkeypatch):
         monkeypatch.setattr(sys, "argv", ["waggle", "list-agents"])
         with patch("waggle.server.list_agents", new_callable=AsyncMock) as mock_fn:

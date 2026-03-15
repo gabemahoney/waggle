@@ -1,6 +1,16 @@
 import argparse
 import json
+import re
 import sys
+
+_SHELL_INJECT_RE = re.compile(r'[;&|`$(){}\\<>\'"!]')
+
+
+def _safe_model(value):
+    """Reject model names containing shell metacharacters."""
+    if _SHELL_INJECT_RE.search(value):
+        raise argparse.ArgumentTypeError(f"Invalid model name: {value!r}")
+    return value
 
 
 class WaggleArgumentParser(argparse.ArgumentParser):
@@ -53,7 +63,7 @@ def main():
     spawn_parser.add_argument("--repo", required=True, help="Absolute path to repo directory")
     spawn_parser.add_argument("--session-name", required=True, help="tmux session name to create or reuse")
     spawn_parser.add_argument("--agent", required=True, choices=["claude", "opencode"], help="Agent type: claude or opencode")
-    spawn_parser.add_argument("--model", help="Optional model name (e.g. sonnet, haiku, opus)")
+    spawn_parser.add_argument("--model", type=_safe_model, help="Optional model name (e.g. sonnet, haiku, opus)")
     spawn_parser.add_argument("--command", help="Optional initial command to deliver after agent reaches ready state")
     spawn_parser.add_argument("--settings", help="Optional extra CLI flags (e.g. --dangerously-skip-permissions)")
 
