@@ -236,6 +236,40 @@ test_close_session_missing_args_json() {
 }
 
 # ============================================================================
+# Session interaction subcommand tests
+# ============================================================================
+
+test_read_pane_help() {
+    CURRENT_TEST="test_read_pane_help"
+    capture_cmd poetry run --directory "$REPO" waggle read-pane --help
+    assert_eq "$CMD_EXIT" "0" "$CURRENT_TEST"
+    pass_test "$CURRENT_TEST"
+}
+
+test_send_command_help() {
+    CURRENT_TEST="test_send_command_help"
+    capture_cmd poetry run --directory "$REPO" waggle send-command --help
+    assert_eq "$CMD_EXIT" "0" "$CURRENT_TEST"
+    pass_test "$CURRENT_TEST"
+}
+
+test_read_pane_missing_session_json() {
+    CURRENT_TEST="test_read_pane_missing_session_json"
+    capture_cmd poetry run --directory "$REPO" waggle read-pane
+    assert_eq "$CMD_EXIT" "2" "$CURRENT_TEST"
+    assert_contains "$CMD_OUT" '"status"' "$CURRENT_TEST"
+    pass_test "$CURRENT_TEST"
+}
+
+test_send_command_missing_args_json() {
+    CURRENT_TEST="test_send_command_missing_args_json"
+    capture_cmd poetry run --directory "$REPO" waggle send-command
+    assert_eq "$CMD_EXIT" "2" "$CURRENT_TEST"
+    assert_contains "$CMD_OUT" '"status"' "$CURRENT_TEST"
+    pass_test "$CURRENT_TEST"
+}
+
+# ============================================================================
 # Run all tests
 # ============================================================================
 
@@ -263,6 +297,12 @@ run_test test_delete_repo_agents_help
 run_test test_list_agents_returns_json
 run_test test_spawn_agent_missing_args_json
 run_test test_close_session_missing_args_json
+
+# Session interaction subcommand tests
+run_test test_read_pane_help
+run_test test_send_command_help
+run_test test_read_pane_missing_session_json
+run_test test_send_command_missing_args_json
 
 # ============================================================================
 # Summary
