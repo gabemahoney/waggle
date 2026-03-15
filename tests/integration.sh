@@ -23,7 +23,6 @@ pass_test() {
 fail_test() {
     FAIL_COUNT=$((FAIL_COUNT + 1))
     echo "[FAIL] $1: $2"
-    exit 1
 }
 
 run_test() {

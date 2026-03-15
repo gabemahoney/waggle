@@ -1,7 +1,6 @@
 import argparse
 import json
 import sys
-import waggle.server
 
 
 class WaggleArgumentParser(argparse.ArgumentParser):
@@ -31,4 +30,5 @@ def main():
         parser.print_help()
         sys.exit(0)
     elif args.subcommand == "serve":
+        import waggle.server
         waggle.server.run()

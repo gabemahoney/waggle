@@ -39,13 +39,15 @@ OpenCode / manual users:
 poetry install
 ```
 
-**Alternative install methods:**
+**Alternative install methods** (from local clone):
 
 ```bash
-pipx install waggle
+pipx install .
 # or
-uv tool install waggle
+uv tool install .
 ```
+
+> Once waggle is published to PyPI, you can use `pipx install waggle` / `uv tool install waggle`.
 
 ## Quick Start
 
