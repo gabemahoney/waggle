@@ -162,6 +162,15 @@ class TestReadPane:
             assert exc.value.code == 0
             mock_fn.assert_called_once_with("$1", None, 100)
 
+    def test_read_pane_with_pane_id(self, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["waggle", "read-pane", "--session-id", "$1", "--pane-id", "%2"])
+        with patch("waggle.server.read_pane", new_callable=AsyncMock) as mock_fn:
+            mock_fn.return_value = {"status": "success", "agent_state": "waiting", "content": ""}
+            with pytest.raises(SystemExit) as exc:
+                main()
+            assert exc.value.code == 0
+            mock_fn.assert_called_once_with("$1", "%2", 50)
+
 
 class TestSendCommand:
     def test_send_command_basic(self, monkeypatch):
@@ -182,16 +191,17 @@ class TestSendCommand:
             assert exc.value.code == 0
             mock_fn.assert_called_once_with("$1", "3", None, "hello")
 
-
-class TestSessionInteractionExitCodes:
-    def test_session_interaction_success_exits_0(self, monkeypatch):
-        monkeypatch.setattr(sys, "argv", ["waggle", "read-pane", "--session-id", "$1"])
-        with patch("waggle.server.read_pane", new_callable=AsyncMock) as mock_fn:
-            mock_fn.return_value = {"status": "success", "agent_state": "done", "content": ""}
+    def test_send_command_with_pane_id(self, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["waggle", "send-command", "--session-id", "$1", "--command", "1", "--pane-id", "%2"])
+        with patch("waggle.server.send_command", new_callable=AsyncMock) as mock_fn:
+            mock_fn.return_value = {"status": "success", "message": "command delivered"}
             with pytest.raises(SystemExit) as exc:
                 main()
             assert exc.value.code == 0
+            mock_fn.assert_called_once_with("$1", "1", "%2", None)
 
+
+class TestSessionInteractionExitCodes:
     def test_session_interaction_error_exits_1(self, monkeypatch):
         monkeypatch.setattr(sys, "argv", ["waggle", "read-pane", "--session-id", "$1"])
         with patch("waggle.server.read_pane", new_callable=AsyncMock) as mock_fn:
