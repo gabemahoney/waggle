@@ -288,6 +288,34 @@ test_waggle_help_all_subcommands() {
     pass_test "$CURRENT_TEST"
 }
 
+test_sting_help() {
+    CURRENT_TEST="test_sting_help"
+    capture_cmd poetry run --directory "$REPO" waggle sting --help
+    assert_eq "$CMD_EXIT" "0" "$CURRENT_TEST"
+    pass_test "$CURRENT_TEST"
+}
+
+test_sting_silent_when_configured() {
+    # At this point in CI, waggle MCP is registered by install.sh
+    CURRENT_TEST="test_sting_silent_when_configured"
+    capture_cmd poetry run --directory "$REPO" waggle sting
+    assert_eq "$CMD_EXIT" "0" "$CURRENT_TEST"
+    assert_eq "$CMD_OUT" "" "$CURRENT_TEST"
+    pass_test "$CURRENT_TEST"
+}
+
+test_sting_prints_reference_when_not_configured() {
+    # Run with a temp HOME that has no waggle MCP config
+    CURRENT_TEST="test_sting_prints_reference_when_not_configured"
+    local temp_home
+    temp_home=$(mktemp -d)
+    capture_cmd env HOME="$temp_home" poetry run --directory "$REPO" waggle sting
+    assert_eq "$CMD_EXIT" "0" "$CURRENT_TEST"
+    assert_contains "$CMD_OUT" "serve" "$CURRENT_TEST"
+    rm -rf "$temp_home"
+    pass_test "$CURRENT_TEST"
+}
+
 # ============================================================================
 # Run all tests
 # ============================================================================
@@ -325,6 +353,9 @@ run_test test_send_command_missing_args_json
 
 # Sting subcommand tests
 run_test test_waggle_help_all_subcommands
+run_test test_sting_help
+run_test test_sting_silent_when_configured
+run_test test_sting_prints_reference_when_not_configured
 
 # ============================================================================
 # Summary
