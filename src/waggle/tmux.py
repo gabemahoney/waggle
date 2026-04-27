@@ -192,13 +192,21 @@ async def create_session(session_name: str, repo_path: str, worker_id: str) -> d
 def _launch_agent_in_pane_sync(
     session_id: str,
     model: str,
-    settings: str | None,
+    settings: str | None = None,
+    mcp_config_path: str | None = None,
 ) -> dict:
     try:
         server = libtmux.Server()
         session = server.sessions.get(session_id=session_id)
         pane = session.active_window.active_pane
-        cmd = f"claude --model {model.lower()}"
+        if mcp_config_path:
+            cmd = (
+                f"claude --mcp-config {mcp_config_path}"
+                f" --dangerously-load-development-channels server:waggle-worker"
+                f" --model {model.lower()}"
+            )
+        else:
+            cmd = f"claude --model {model.lower()}"
         if settings:
             # Only allow characters valid in CLI flags to prevent shell injection
             if re.search(r'[;&|`$(){}\\<>]', settings):
@@ -216,6 +224,7 @@ async def launch_agent_in_pane(
     session_id: str,
     model: str,
     settings: str | None = None,
+    mcp_config_path: str | None = None,
 ) -> dict:
     """Send a claude launch command to the active pane of a session.
 
@@ -223,11 +232,13 @@ async def launch_agent_in_pane(
         session_id: The tmux session ID (e.g. "$1").
         model: Model name (e.g. "sonnet", "haiku", "opus").
         settings: Optional extra CLI flags (e.g. "--dangerously-skip-permissions").
+        mcp_config_path: Optional path to an MCP config JSON file. When provided,
+            launches with --mcp-config and --dangerously-load-development-channels.
 
     Returns:
         {"status": "success"} or {"status": "error", "message": str}
     """
-    return await asyncio.to_thread(_launch_agent_in_pane_sync, session_id, model, settings)
+    return await asyncio.to_thread(_launch_agent_in_pane_sync, session_id, model, settings, mcp_config_path)
 
 
 def clone_or_update_repo(repo: str, repos_path: str) -> str:

@@ -2,7 +2,7 @@
 
 ## Overview
 
-`spawn_worker` creates a new worker for a caller: checks concurrency limits, clones the repo if needed, creates a tmux session, launches claude, and records the worker in the database.
+`spawn_worker` creates a new worker for a caller: checks concurrency limits, clones the repo if needed, creates a tmux session, writes a per-worker MCP config file, launches claude with Claude Channels support, and records the worker in the database.
 
 Defined in `src/waggle/engine.py`. Delegates tmux operations to `src/waggle/tmux.py`.
 
@@ -18,14 +18,45 @@ Defined in `src/waggle/engine.py`. Delegates tmux operations to `src/waggle/tmux
 
 ## Flow
 
-1. **Concurrency check** — count active workers (`status != 'done'`) for caller; reject if `>= max_workers`
+1. **Concurrency check** — count active workers (`status != 'done'`); reject if `>= max_workers`
 2. **Generate UUID** for `worker_id`
 3. **Generate session name** if not provided: `waggle-{worker_id[:8]}`
 4. **Clone/pull repo** if URL via `clone_or_update_repo()`
 5. **Create tmux session** via `create_session(session_name, local_repo, worker_id)` — sets `WAGGLE_WORKER_ID` env var
-6. **Launch claude** via `launch_agent_in_pane(session_id, model)`
+5b. **Write per-worker MCP config** to `~/.waggle/worker-configs/{worker_id}/mcp.json` (see below)
+6. **Launch claude** via `launch_agent_in_pane(session_id, model, mcp_config_path=...)` — uses `--mcp-config` and `--dangerously-load-development-channels`
 7. **Insert into workers table** (`status = 'working'`)
 8. **Return** `{worker_id, session_name}`
+
+## Per-Worker MCP Config
+
+At spawn time, engine writes `~/.waggle/worker-configs/{worker_id}/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "waggle-worker": {
+      "type": "http",
+      "url": "http://localhost:{mcp_worker_port}/mcp?worker_id={worker_id}"
+    }
+  }
+}
+```
+
+`mcp_worker_port` comes from `config.get_config()["mcp_worker_port"]` (default `8423`).
+
+This config is passed to claude via `--mcp-config`, enabling the worker to connect to the waggle worker MCP server and register itself for Claude Channels notification delivery.
+
+## Claude Launch Flags
+
+`launch_agent_in_pane` builds the following command when `mcp_config_path` is provided:
+
+```
+claude --mcp-config {mcp_config_path} --dangerously-load-development-channels server:waggle-worker --model {model}
+```
+
+- `--mcp-config` — points claude at the per-worker MCP server config
+- `--dangerously-load-development-channels server:waggle-worker` — enables Claude Channels for the `waggle-worker` MCP server, allowing the daemon to push notifications to the worker
 
 ## Errors
 
@@ -35,7 +66,12 @@ Defined in `src/waggle/engine.py`. Delegates tmux operations to `src/waggle/tmux
 | `repo_clone_failed` | git clone or fetch/reset failed |
 | `invalid_repo` | URL cannot be parsed (no owner/repo path components) |
 
-> **Epic 3 note**: A future pass will add `--mcp-config` and Claude Channels (`--dangerously-load-development-channels`) to the `launch_agent_in_pane` call.
+## Termination
+
+`terminate_worker` (also in `engine.py`) performs cleanup after killing the tmux session:
+
+1. **Delete config directory** — `shutil.rmtree(~/.waggle/worker-configs/{worker_id}, ignore_errors=True)`
+2. **Unregister from WorkerRegistry** — `registry.unregister(worker_id)` removes the in-memory MCP session reference
 
 ## Sequence Diagram
 
@@ -46,6 +82,7 @@ sequenceDiagram
     participant TM as tmux.py
     participant TX as tmux/libtmux
     participant DB as SQLite DB
+    participant FS as Filesystem
 
     C->>E: spawn_worker(caller_id, model, repo, session_name?, command?)
 
@@ -72,9 +109,13 @@ sequenceDiagram
     TX-->>TM: new session
     TM-->>E: {status: "success", session_id, ...}
 
+    Note over E: Step 5b: Write MCP config
+    E->>FS: mkdir ~/.waggle/worker-configs/{worker_id}/
+    E->>FS: write mcp.json with waggle-worker MCP server URL
+
     Note over E: Step 6: Launch claude
-    E->>TM: launch_agent_in_pane(session_id, model)
-    TM->>TX: pane.send_keys("claude --model {model}", enter=True)
+    E->>TM: launch_agent_in_pane(session_id, model, mcp_config_path=...)
+    TM->>TX: pane.send_keys("claude --mcp-config ... --dangerously-load-development-channels server:waggle-worker --model {model}", enter=True)
     TX-->>TM: ok
     TM-->>E: {status: "success"}
 

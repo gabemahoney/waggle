@@ -4,6 +4,8 @@ Caller-type agnostic — no MCP or HTTP types in signatures.
 All operations return plain dicts; errors use an "error" key.
 """
 
+import json
+import shutil
 import uuid
 from pathlib import Path
 
@@ -110,10 +112,27 @@ async def spawn_worker(
 
     session_id = session_result["session_id"]
 
+    # Step 5b: Write per-worker MCP config
+    mcp_worker_port = int(cfg["mcp_worker_port"])
+    worker_config_dir = Path.home() / ".waggle" / "worker-configs" / worker_id
+    worker_config_dir.mkdir(parents=True, exist_ok=True)
+    mcp_config_path = worker_config_dir / "mcp.json"
+    mcp_config_path.write_text(
+        json.dumps({
+            "mcpServers": {
+                "waggle-worker": {
+                    "type": "http",
+                    "url": f"http://localhost:{mcp_worker_port}/mcp?worker_id={worker_id}",
+                }
+            }
+        })
+    )
+
     # Step 6: Launch claude
-    launch_result = await tmux.launch_agent_in_pane(session_id, model)
+    launch_result = await tmux.launch_agent_in_pane(session_id, model, mcp_config_path=str(mcp_config_path))
     if launch_result.get("status") != "success":
         await tmux.kill_session(session_id)
+        shutil.rmtree(worker_config_dir, ignore_errors=True)
         return {"error": launch_result.get("message", "launch_agent_in_pane failed")}
 
     # Step 7: Insert into DB
@@ -251,6 +270,14 @@ async def terminate_worker(caller_id: str, worker_id: str, force: bool = False) 
         return {"error": "worker_not_found"}
 
     await tmux.kill_session(row["session_id"])
+
+    # Clean up per-worker MCP config directory
+    worker_config_dir = Path.home() / ".waggle" / "worker-configs" / worker_id
+    shutil.rmtree(worker_config_dir, ignore_errors=True)
+
+    # Unregister from WorkerRegistry
+    from waggle.worker_mcp import registry
+    registry.unregister(worker_id)
 
     with database.connection(db_path) as conn:
         conn.execute(

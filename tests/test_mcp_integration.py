@@ -37,6 +37,7 @@ def db_path(tmp_path, monkeypatch):
             "database_path": path,
             "max_workers": 3,
             "repos_path": str(tmp_path / "repos"),
+            "mcp_worker_port": 8423,
         },
     )
     return path
@@ -188,6 +189,7 @@ async def test_concurrency_limit(tmp_path, monkeypatch, mock_tmux):
             "database_path": path,
             "max_workers": 2,
             "repos_path": str(tmp_path / "repos"),
+            "mcp_worker_port": 8423,
         },
     )
 

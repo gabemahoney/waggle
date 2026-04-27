@@ -606,7 +606,7 @@ class TestLaunchAgentInPaneAsync:
 
         result = await launch_agent_in_pane("$1", "sonnet", "--no-interactive")
 
-        mock_sync.assert_called_once_with("$1", "sonnet", "--no-interactive")
+        mock_sync.assert_called_once_with("$1", "sonnet", "--no-interactive", None)
         assert result == {"status": "success"}
 
     @pytest.mark.asyncio
@@ -617,5 +617,5 @@ class TestLaunchAgentInPaneAsync:
 
         result = await launch_agent_in_pane("$1", "haiku")
 
-        mock_sync.assert_called_once_with("$1", "haiku", None)
+        mock_sync.assert_called_once_with("$1", "haiku", None, None)
         assert result == {"status": "success"}
