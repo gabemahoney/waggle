@@ -89,6 +89,19 @@ async def get_output(worker_id: str, scrollback: int = 200, ctx: Context = None)
 
 
 @mcp.tool()
+async def send_input(worker_id: str, text: str, ctx: Context = None) -> dict:
+    """Send text input to a worker via Claude Channels.
+
+    Args:
+        worker_id: Worker UUID to send input to.
+        text: Text content to deliver.
+        ctx: MCP context (auto-injected).
+    """
+    caller_id = _get_caller_id(ctx)
+    return await engine.send_input(caller_id, worker_id, text)
+
+
+@mcp.tool()
 async def terminate_worker(worker_id: str, force: bool = False, ctx: Context = None) -> dict:
     """Terminate a worker and clean up its resources.
 

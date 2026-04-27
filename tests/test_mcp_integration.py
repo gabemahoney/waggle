@@ -6,7 +6,7 @@ sufficient for single-caller tests; multi-caller tests call engine directly.
 """
 
 import pytest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from waggle import engine, server
 from waggle.database import init_schema
@@ -16,6 +16,7 @@ check_status = server.check_status.fn
 get_output = server.get_output.fn
 list_workers = server.list_workers.fn
 register_caller = server.register_caller.fn
+send_input = server.send_input.fn
 spawn_worker = server.spawn_worker.fn
 terminate_worker = server.terminate_worker.fn
 
@@ -249,3 +250,33 @@ async def test_response_shapes(db_path, mock_tmux):
     result = await terminate_worker(worker_id=worker_id, ctx=None)
     assert result["worker_id"] == worker_id
     assert result["terminated"] is True
+
+
+# ---------------------------------------------------------------------------
+# Test 5: send_input (Claude Channels)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_send_input_integration(db_path, mock_tmux):
+    """send_input delivers to a connected worker; errors on disconnected."""
+    await register_caller(caller_type="local", ctx=None)
+    result = await spawn_worker(model="sonnet", repo="/some/repo", ctx=None)
+    worker_id = result["worker_id"]
+
+    # Worker not yet in registry → worker_not_connected
+    with patch("waggle.worker_mcp.registry") as mock_registry:
+        mock_registry.get.return_value = None
+        result = await send_input(worker_id=worker_id, text="hello", ctx=None)
+    assert result == {"error": "worker_not_connected"}
+
+    # Worker connects (added to registry with a mock session)
+    mock_session = MagicMock()
+    mock_session._write_stream.send = AsyncMock()
+
+    with patch("waggle.worker_mcp.registry") as mock_registry:
+        mock_registry.get.return_value = mock_session
+        result = await send_input(worker_id=worker_id, text="hello", ctx=None)
+
+    assert result == {"worker_id": worker_id, "delivered": True}
+    mock_session._write_stream.send.assert_awaited_once()

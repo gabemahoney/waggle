@@ -240,6 +240,47 @@ async def get_output(caller_id: str, worker_id: str, scrollback: int = 200) -> d
     return {"worker_id": worker_id, "lines": result["content"]}
 
 
+async def send_input(caller_id: str, worker_id: str, text: str) -> dict:
+    """Send text input to a worker via Claude Channels notification.
+
+    Args:
+        caller_id: Caller sending the input (scope check).
+        worker_id: Worker to receive the input.
+        text: Text content to deliver.
+
+    Returns:
+        {"worker_id": str, "delivered": True}
+        or {"error": "worker_not_found"} / {"error": "worker_not_connected"}
+    """
+    with database.connection(_db_path()) as conn:
+        row = conn.execute(
+            "SELECT worker_id FROM workers WHERE worker_id = ? AND caller_id = ?",
+            (worker_id, caller_id),
+        ).fetchone()
+
+    if row is None:
+        return {"error": "worker_not_found"}
+
+    from waggle.worker_mcp import registry
+
+    session = registry.get(worker_id)
+    if session is None:
+        return {"error": "worker_not_connected"}
+
+    from mcp.types import JSONRPCNotification, JSONRPCMessage
+    from mcp.shared.session import SessionMessage
+
+    notification = JSONRPCNotification(
+        jsonrpc="2.0",
+        method="notifications/claude/channel",
+        params={"content": text, "meta": {"worker_id": worker_id}},
+    )
+    session_message = SessionMessage(message=JSONRPCMessage(notification))
+    await session._write_stream.send(session_message)
+
+    return {"worker_id": worker_id, "delivered": True}
+
+
 async def terminate_worker(caller_id: str, worker_id: str, force: bool = False) -> dict:
     """Terminate a worker and remove it from the database.
 
