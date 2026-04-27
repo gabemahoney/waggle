@@ -186,8 +186,8 @@ def main():
         parser.print_help()
         sys.exit(0)
     elif args.subcommand == "serve":
-        import waggle.server
-        waggle.server.run()
+        import waggle.daemon
+        waggle.daemon.run()
     elif args.subcommand == "list-agents":
         import asyncio
         import waggle.server
