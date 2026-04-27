@@ -1,4 +1,8 @@
-"""Tests for waggle.state_parser — pane content state detection."""
+"""Tests for waggle.state_parser — pane content state detection.
+
+Note: In v2, ask_user and check_permission states are set by dedicated relay hooks,
+not detected by the parser via set-state. Parser tests are preserved for correctness.
+"""
 
 from pathlib import Path
 

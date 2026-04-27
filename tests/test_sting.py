@@ -86,6 +86,5 @@ class TestHandleSting:
 
 class TestCliReference:
     def test_contains_all_subcommands(self):
-        for cmd in ["serve", "list-agents", "spawn-agent", "close-session",
-                    "delete-repo-agents", "read-pane", "send-command", "sting"]:
+        for cmd in ["serve", "set-state", "sting"]:
             assert cmd in _CLI_REFERENCE, f"_CLI_REFERENCE missing: {cmd}"

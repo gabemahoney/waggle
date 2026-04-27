@@ -9,17 +9,12 @@ from pathlib import Path
 _WAGGLE_PATTERN = re.compile(r"(?i)(?:^|[-_])waggle(?:$|[-_])")
 
 _CLI_REFERENCE = """\
-waggle is a CLI tool for managing Claude agent lifecycles via tmux.
+waggle is an HTTP daemon for managing Claude Code worker agents via tmux.
 All subcommands output JSON to stdout. Exit 0 on success, exit 1 on error, exit 2 on usage error.
 Run waggle <command> --help for full usage on any command.
 
-  serve                 Start the waggle MCP server (stdio transport)
-  list-agents           List active waggle agents with their status
-  spawn-agent           Spawn a Claude or OpenCode agent in a tmux session
-  close-session         Close an agent session and remove its database entry
-  delete-repo-agents    Delete all agent state for a repository
-  read-pane             Read content from an agent's tmux pane and detect agent state
-  send-command          Send a command or option number to an agent's tmux pane
+  serve                 Start the Waggle HTTP daemon (Uvicorn + FastMCP)
+  set-state             Update worker state from tmux pane content (used by hooks)
   sting                 Emit this CLI reference if waggle MCP is not configured"""
 
 

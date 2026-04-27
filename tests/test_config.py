@@ -1,28 +1,31 @@
-"""Tests for config module."""
+"""Tests for config module (v2)."""
 
 import json
-import os
-import tempfile
 from pathlib import Path
-from unittest import mock
 
 import pytest
 
-from waggle.config import get_config, get_db_path
+from waggle.config import (
+    get_config,
+    get_db_path,
+    get_http_port,
+    get_max_workers,
+    get_mcp_worker_port,
+    get_queue_path,
+    get_repos_path,
+)
 
 
 @pytest.fixture
 def temp_home(tmp_path, monkeypatch):
-    """Create a temporary home directory for testing."""
+    """Redirect HOME and Path.home() to tmp_path."""
     monkeypatch.setenv("HOME", str(tmp_path))
-    # Update Path.home() to return tmp_path
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     return tmp_path
 
 
 @pytest.fixture
 def config_dir(temp_home):
-    """Create ~/.waggle directory."""
     waggle_dir = temp_home / ".waggle"
     waggle_dir.mkdir(parents=True, exist_ok=True)
     return waggle_dir
@@ -30,104 +33,214 @@ def config_dir(temp_home):
 
 @pytest.fixture
 def config_file(config_dir):
-    """Path to config file."""
     return config_dir / "config.json"
 
 
-class TestGetConfig:
-    """Tests for get_config() function."""
-    
-    def test_missing_config_file_returns_empty_dict(self, temp_home):
-        """When config file doesn't exist, returns empty dict."""
-        result = get_config()
-        assert result == {}
-    
-    def test_missing_config_file_creates_directory(self, temp_home):
-        """When config file doesn't exist, creates ~/.waggle directory."""
-        waggle_dir = temp_home / ".waggle"
-        assert not waggle_dir.exists()
-        
-        get_config()
-        
-        assert waggle_dir.exists()
-        assert waggle_dir.is_dir()
-    
-    def test_valid_json_returns_parsed_config(self, config_file):
-        """When config file contains valid JSON, returns parsed dict."""
-        config_data = {"database_path": "/custom/path/db.sqlite"}
-        with open(config_file, 'w') as f:
-            json.dump(config_data, f)
-        
-        result = get_config()
-        assert result == config_data
-    
-    def test_malformed_json_returns_empty_dict(self, config_file):
-        """When config file contains malformed JSON, returns empty dict."""
-        with open(config_file, 'w') as f:
-            f.write("{this is not valid json")
-        
-        result = get_config()
-        assert result == {}
-    
-    def test_non_dict_json_returns_empty_dict(self, config_file):
-        """When config file contains non-dict JSON, returns empty dict."""
-        with open(config_file, 'w') as f:
-            json.dump(["not", "a", "dict"], f)
-        
-        result = get_config()
-        assert result == {}
-    
-    def test_empty_file_returns_empty_dict(self, config_file):
-        """When config file is empty, returns empty dict."""
-        config_file.touch()
-        
-        result = get_config()
-        assert result == {}
+class TestAllDefaults:
+    def test_all_default_keys_present(self, temp_home):
+        config = get_config()
+        expected_keys = {
+            "database_path", "queue_path", "max_workers", "state_poll_interval_seconds",
+            "output_capture_lines", "http_port", "mcp_worker_port", "relay_timeout_seconds",
+            "authorized_keys_path", "repos_path", "admin_email", "admin_notify_after_retries",
+            "max_retry_hours", "tls_cert_path", "tls_key_path",
+        }
+        assert set(config.keys()) == expected_keys
+
+    def test_database_path_default(self, temp_home):
+        assert get_config()["database_path"] == "~/.waggle/state.db"
+
+    def test_queue_path_default(self, temp_home):
+        assert get_config()["queue_path"] == "~/.waggle/queue.db"
+
+    def test_max_workers_default(self, temp_home):
+        assert get_config()["max_workers"] == 8
+
+    def test_state_poll_interval_default(self, temp_home):
+        assert get_config()["state_poll_interval_seconds"] == 2
+
+    def test_output_capture_lines_default(self, temp_home):
+        assert get_config()["output_capture_lines"] == 50
+
+    def test_http_port_default(self, temp_home):
+        assert get_config()["http_port"] == 8422
+
+    def test_mcp_worker_port_default(self, temp_home):
+        assert get_config()["mcp_worker_port"] == 8423
+
+    def test_relay_timeout_default(self, temp_home):
+        assert get_config()["relay_timeout_seconds"] == 3600
+
+    def test_authorized_keys_path_default(self, temp_home):
+        assert get_config()["authorized_keys_path"] == "~/.waggle/authorized_keys.json"
+
+    def test_repos_path_default(self, temp_home):
+        assert get_config()["repos_path"] == "~/.waggle/repos"
+
+    def test_admin_email_default(self, temp_home):
+        assert get_config()["admin_email"] == ""
+
+    def test_admin_notify_after_retries_default(self, temp_home):
+        assert get_config()["admin_notify_after_retries"] == 5
+
+    def test_max_retry_hours_default(self, temp_home):
+        assert get_config()["max_retry_hours"] == 72
+
+    def test_tls_cert_path_default(self, temp_home):
+        assert get_config()["tls_cert_path"] == ""
+
+    def test_tls_key_path_default(self, temp_home):
+        assert get_config()["tls_key_path"] == ""
 
 
-class TestGetDbPath:
-    """Tests for get_db_path() function."""
-    
-    def test_no_config_returns_default_path(self, temp_home):
-        """When no config exists, returns default database path."""
+class TestFileOverrides:
+    def test_file_overrides_database_path(self, config_file):
+        config_file.write_text(json.dumps({"database_path": "/custom/db.sqlite"}))
+        assert get_config()["database_path"] == "/custom/db.sqlite"
+
+    def test_file_overrides_http_port(self, config_file):
+        config_file.write_text(json.dumps({"http_port": 9000}))
+        assert get_config()["http_port"] == 9000
+
+    def test_file_overrides_max_workers(self, config_file):
+        config_file.write_text(json.dumps({"max_workers": 16}))
+        assert get_config()["max_workers"] == 16
+
+    def test_non_overridden_keys_keep_defaults(self, config_file):
+        config_file.write_text(json.dumps({"http_port": 9000}))
+        config = get_config()
+        assert config["max_workers"] == 8
+        assert config["database_path"] == "~/.waggle/state.db"
+
+    def test_multiple_overrides(self, config_file):
+        overrides = {"http_port": 9001, "max_workers": 4, "admin_email": "ops@example.com"}
+        config_file.write_text(json.dumps(overrides))
+        config = get_config()
+        assert config["http_port"] == 9001
+        assert config["max_workers"] == 4
+        assert config["admin_email"] == "ops@example.com"
+
+
+class TestUnknownKeysIgnored:
+    def test_unknown_key_not_in_result(self, config_file):
+        config_file.write_text(json.dumps({"unknown_key": "value", "http_port": 9001}))
+        config = get_config()
+        assert "unknown_key" not in config
+        assert config["http_port"] == 9001
+
+    def test_all_unknown_keys_ignored(self, config_file):
+        config_file.write_text(json.dumps({"foo": 1, "bar": 2, "baz": 3}))
+        config = get_config()
+        assert "foo" not in config
+        assert "bar" not in config
+        assert "baz" not in config
+        # All defaults still present
+        assert config["http_port"] == 8422
+
+
+class TestTildeExpansion:
+    def test_get_db_path_expands_tilde(self, temp_home):
         result = get_db_path()
-        expected = str(temp_home / ".waggle" / "agent_state.db")
+        assert "~" not in result
+        assert str(temp_home) in result
+
+    def test_get_queue_path_expands_tilde(self, temp_home):
+        result = get_queue_path()
+        assert "~" not in result
+        assert str(temp_home) in result
+
+    def test_get_repos_path_expands_tilde(self, temp_home):
+        result = get_repos_path()
+        assert "~" not in result
+        assert str(temp_home) in result
+
+    def test_custom_tilde_path_in_database_path(self, config_file, temp_home):
+        config_file.write_text(json.dumps({"database_path": "~/.waggle/custom.db"}))
+        result = get_db_path()
+        assert "~" not in result
+        assert str(temp_home / ".waggle" / "custom.db") == result
+
+    def test_authorized_keys_path_tilde_expansion(self, config_file, temp_home):
+        config_file.write_text(
+            json.dumps({"authorized_keys_path": "~/.waggle/custom_keys.json"})
+        )
+        raw = get_config()["authorized_keys_path"]
+        expanded = str(Path(raw).expanduser())
+        assert "~" not in expanded
+        assert str(temp_home) in expanded
+
+
+class TestMalformedJSON:
+    def test_malformed_json_returns_defaults(self, config_file):
+        config_file.write_text("{this is not valid json")
+        config = get_config()
+        assert config["database_path"] == "~/.waggle/state.db"
+        assert config["http_port"] == 8422
+
+    def test_malformed_json_has_all_keys(self, config_file):
+        config_file.write_text("{not json at all!")
+        config = get_config()
+        expected_keys = {
+            "database_path", "queue_path", "max_workers", "state_poll_interval_seconds",
+            "output_capture_lines", "http_port", "mcp_worker_port", "relay_timeout_seconds",
+            "authorized_keys_path", "repos_path", "admin_email", "admin_notify_after_retries",
+            "max_retry_hours", "tls_cert_path", "tls_key_path",
+        }
+        assert set(config.keys()) == expected_keys
+
+
+class TestNonDictJSON:
+    def test_array_json_returns_defaults(self, config_file):
+        config_file.write_text(json.dumps(["not", "a", "dict"]))
+        config = get_config()
+        assert config["http_port"] == 8422
+        assert config["database_path"] == "~/.waggle/state.db"
+
+    def test_string_json_returns_defaults(self, config_file):
+        config_file.write_text(json.dumps("just a string"))
+        config = get_config()
+        assert config["database_path"] == "~/.waggle/state.db"
+
+    def test_null_json_returns_defaults(self, config_file):
+        config_file.write_text("null")
+        config = get_config()
+        assert config["max_workers"] == 8
+
+
+class TestPathAccessors:
+    def test_get_db_path_returns_absolute(self, temp_home):
+        assert Path(get_db_path()).is_absolute()
+
+    def test_get_queue_path_returns_absolute(self, temp_home):
+        assert Path(get_queue_path()).is_absolute()
+
+    def test_get_repos_path_returns_absolute(self, temp_home):
+        assert Path(get_repos_path()).is_absolute()
+
+    def test_get_db_path_default_is_state_db(self, temp_home):
+        result = get_db_path()
+        expected = str(temp_home / ".waggle" / "state.db")
         assert result == expected
-    
-    def test_config_with_database_path_returns_custom_path(self, config_file):
-        """When config specifies database_path, returns that path."""
-        custom_path = "/custom/path/my_database.db"
-        config_data = {"database_path": custom_path}
-        with open(config_file, 'w') as f:
-            json.dump(config_data, f)
-        
-        result = get_db_path()
-        assert result == str(Path(custom_path).absolute())
-    
-    def test_tilde_expansion_in_custom_path(self, config_file, temp_home):
-        """When config specifies path with tilde, expands it correctly."""
-        config_data = {"database_path": "~/.waggle/custom.db"}
-        with open(config_file, 'w') as f:
-            json.dump(config_data, f)
-        
-        result = get_db_path()
-        expected = str(temp_home / ".waggle" / "custom.db")
-        assert result == expected
-    
-    def test_returns_absolute_path(self, config_file):
-        """get_db_path() always returns absolute path."""
-        config_data = {"database_path": "relative/path/db.sqlite"}
-        with open(config_file, 'w') as f:
-            json.dump(config_data, f)
-        
-        result = get_db_path()
-        assert Path(result).is_absolute()
-    
-    def test_malformed_config_returns_default_path(self, config_file, temp_home):
-        """When config is malformed, falls back to default path."""
-        with open(config_file, 'w') as f:
-            f.write("{malformed json")
-        
-        result = get_db_path()
-        expected = str(temp_home / ".waggle" / "agent_state.db")
-        assert result == expected
+
+
+class TestPortAndIntAccessors:
+    def test_get_http_port_returns_int(self, temp_home):
+        result = get_http_port()
+        assert isinstance(result, int)
+        assert result == 8422
+
+    def test_get_mcp_worker_port_returns_int(self, temp_home):
+        result = get_mcp_worker_port()
+        assert isinstance(result, int)
+        assert result == 8423
+
+    def test_get_max_workers_returns_int(self, temp_home):
+        result = get_max_workers()
+        assert isinstance(result, int)
+        assert result == 8
+
+    def test_get_http_port_with_string_config_value(self, config_file, temp_home):
+        config_file.write_text(json.dumps({"http_port": "9000"}))
+        result = get_http_port()
+        assert isinstance(result, int)
+        assert result == 9000

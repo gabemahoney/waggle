@@ -1,7 +1,6 @@
-"""Tests for database module."""
+"""Tests for database module (v2 schema)."""
 
 import sqlite3
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -10,383 +9,346 @@ from waggle.database import init_schema, connection
 
 
 @pytest.fixture
-def temp_db():
-    """Create a temporary database file."""
-    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
-        db_path = f.name
+def temp_db(tmp_path):
+    db_path = str(tmp_path / "test.db")
     yield db_path
-    # Cleanup
-    Path(db_path).unlink(missing_ok=True)
 
 
 @pytest.fixture
-def temp_db_dir(tmp_path):
-    """Create a temporary directory for database."""
-    return tmp_path / "test_db"
+def initialized_db(temp_db):
+    init_schema(temp_db)
+    return temp_db
 
 
-class TestInitSchema:
-    """Tests for init_schema() function."""
-    
-    def test_creates_state_table_on_first_call(self, temp_db):
-        """First call to init_schema() creates the state table."""
-        init_schema(temp_db)
-        
-        conn = sqlite3.connect(temp_db)
+class TestWALMode:
+    def test_wal_mode_enabled_after_init_schema(self, initialized_db):
+        conn = sqlite3.connect(initialized_db)
         cursor = conn.cursor()
-        
-        # Check table exists
+        cursor.execute("PRAGMA journal_mode")
+        result = cursor.fetchone()
+        conn.close()
+        assert result[0] == "wal"
+
+
+class TestSchemaCreation:
+    def test_all_four_tables_created(self, initialized_db):
+        conn = sqlite3.connect(initialized_db)
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+        tables = {row[0] for row in cursor.fetchall()}
+        conn.close()
+        assert {"workers", "callers", "requests", "pending_relays"} <= tables
+
+    def test_workers_columns(self, initialized_db):
+        conn = sqlite3.connect(initialized_db)
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(workers)")
+        columns = {row[1] for row in cursor.fetchall()}
+        conn.close()
+        expected = {
+            "worker_id", "caller_id", "session_name", "session_id", "model",
+            "repo", "status", "output", "mcp_session_id", "created_at", "updated_at",
+        }
+        assert columns == expected
+
+    def test_callers_columns(self, initialized_db):
+        conn = sqlite3.connect(initialized_db)
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(callers)")
+        columns = {row[1] for row in cursor.fetchall()}
+        conn.close()
+        assert columns == {"caller_id", "caller_type", "cma_session_id", "registered_at"}
+
+    def test_requests_columns(self, initialized_db):
+        conn = sqlite3.connect(initialized_db)
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(requests)")
+        columns = {row[1] for row in cursor.fetchall()}
+        conn.close()
+        assert columns == {
+            "request_id", "caller_id", "operation", "status",
+            "result", "created_at", "completed_at",
+        }
+
+    def test_pending_relays_columns(self, initialized_db):
+        conn = sqlite3.connect(initialized_db)
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(pending_relays)")
+        columns = {row[1] for row in cursor.fetchall()}
+        conn.close()
+        assert columns == {
+            "relay_id", "worker_id", "relay_type", "details",
+            "response", "status", "created_at", "resolved_at",
+        }
+
+
+class TestIndexes:
+    def test_idx_workers_caller_exists(self, initialized_db):
+        conn = sqlite3.connect(initialized_db)
+        cursor = conn.cursor()
         cursor.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='state'"
+            "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_workers_caller'"
         )
         result = cursor.fetchone()
-        assert result is not None
-        assert result[0] == 'state'
-        
-        # Check schema
-        cursor.execute("PRAGMA table_info(state)")
-        columns = {row[1]: row[2] for row in cursor.fetchall()}
-        assert columns == {'key': 'TEXT', 'repo': 'TEXT', 'status': 'TEXT', 'updated_at': 'TIMESTAMP'}
-        
         conn.close()
-    
-    def test_idempotent_repeated_calls_succeed(self, temp_db):
-        """Calling init_schema() multiple times doesn't fail."""
-        init_schema(temp_db)
-        init_schema(temp_db)  # Should not raise
-        init_schema(temp_db)  # Should not raise
-        
-        # Verify table still exists
-        conn = sqlite3.connect(temp_db)
+        assert result is not None
+
+    def test_idx_requests_caller_exists(self, initialized_db):
+        conn = sqlite3.connect(initialized_db)
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='state'"
+            "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_requests_caller'"
         )
-        assert cursor.fetchone() is not None
+        result = cursor.fetchone()
         conn.close()
-    
-    def test_idempotent_preserves_existing_data(self, temp_db):
-        """Repeated calls to init_schema() don't delete existing data."""
-        init_schema(temp_db)
-        
-        # Insert test data
-        conn = sqlite3.connect(temp_db)
+        assert result is not None
+
+    def test_idx_relays_worker_exists(self, initialized_db):
+        conn = sqlite3.connect(initialized_db)
         cursor = conn.cursor()
-        cursor.execute("INSERT INTO state (key, repo, status, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)", ("test_key", "/repo/test", "test_status"))
+        cursor.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_relays_worker'"
+        )
+        result = cursor.fetchone()
+        conn.close()
+        assert result is not None
+
+
+class TestInitSchemaIdempotent:
+    def test_three_calls_succeed(self, temp_db):
+        init_schema(temp_db)
+        init_schema(temp_db)
+        init_schema(temp_db)
+
+    def test_idempotent_preserves_data(self, temp_db):
+        init_schema(temp_db)
+
+        conn = sqlite3.connect(temp_db)
+        conn.execute(
+            "INSERT INTO callers (caller_id, caller_type) VALUES (?, ?)",
+            ("caller-1", "local"),
+        )
         conn.commit()
         conn.close()
-        
-        # Call init_schema again
+
         init_schema(temp_db)
-        
-        # Verify data still exists
+        init_schema(temp_db)
+
         conn = sqlite3.connect(temp_db)
         cursor = conn.cursor()
-        cursor.execute("SELECT status FROM state WHERE key = ?", ("test_key",))
+        cursor.execute("SELECT caller_type FROM callers WHERE caller_id = ?", ("caller-1",))
         result = cursor.fetchone()
-        assert result is not None
-        assert result[0] == "test_status"
         conn.close()
-    
-    def test_creates_parent_directory_if_missing(self, temp_db_dir):
-        """init_schema() creates parent directory if it doesn't exist."""
-        db_path = temp_db_dir / "subdir" / "test.db"
-        assert not db_path.parent.exists()
-        
-        init_schema(str(db_path))
-        
-        assert db_path.parent.exists()
-        assert db_path.exists()
-    
-    def test_works_with_new_database_file(self, temp_db_dir):
-        """init_schema() works with a database file that doesn't exist yet."""
-        db_path = temp_db_dir / "new_db.db"
-        temp_db_dir.mkdir(parents=True, exist_ok=True)
-        
-        assert not db_path.exists()
-        init_schema(str(db_path))
-        assert db_path.exists()
-        
-        # Verify table was created
-        conn = sqlite3.connect(str(db_path))
+        assert result is not None
+        assert result[0] == "local"
+
+    def test_idempotent_tables_still_exist(self, temp_db):
+        init_schema(temp_db)
+        init_schema(temp_db)
+        init_schema(temp_db)
+
+        conn = sqlite3.connect(temp_db)
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        tables = {row[0] for row in cursor.fetchall()}
+        conn.close()
+        assert {"workers", "callers", "requests", "pending_relays"} <= tables
+
+
+class TestCRUDRoundTrip:
+    def test_workers_insert_and_select(self, initialized_db):
+        conn = sqlite3.connect(initialized_db)
+        conn.execute(
+            "INSERT INTO workers (worker_id, caller_id, session_name, session_id, model, repo)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            ("w-1", "c-1", "my-session", "sess-1", "claude-3", "/repo/path"),
+        )
+        conn.commit()
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='state'"
+            "SELECT worker_id, caller_id, status FROM workers WHERE worker_id = ?", ("w-1",)
         )
-        assert cursor.fetchone() is not None
+        row = cursor.fetchone()
+        conn.close()
+        assert row[0] == "w-1"
+        assert row[1] == "c-1"
+        assert row[2] == "working"  # default
+
+    def test_callers_insert_and_select(self, initialized_db):
+        conn = sqlite3.connect(initialized_db)
+        conn.execute(
+            "INSERT INTO callers (caller_id, caller_type) VALUES (?, ?)", ("c-1", "cma")
+        )
+        conn.commit()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT caller_id, caller_type FROM callers WHERE caller_id = ?", ("c-1",)
+        )
+        row = cursor.fetchone()
+        conn.close()
+        assert row[0] == "c-1"
+        assert row[1] == "cma"
+
+    def test_requests_insert_and_select(self, initialized_db):
+        conn = sqlite3.connect(initialized_db)
+        conn.execute(
+            "INSERT INTO requests (request_id, caller_id, operation) VALUES (?, ?, ?)",
+            ("req-1", "c-1", "spawn_worker"),
+        )
+        conn.commit()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT request_id, operation, status FROM requests WHERE request_id = ?", ("req-1",)
+        )
+        row = cursor.fetchone()
+        conn.close()
+        assert row[0] == "req-1"
+        assert row[1] == "spawn_worker"
+        assert row[2] == "pending"  # default
+
+    def test_pending_relays_insert_and_select(self, initialized_db):
+        conn = sqlite3.connect(initialized_db)
+        conn.execute(
+            "INSERT INTO pending_relays (relay_id, worker_id, relay_type, details)"
+            " VALUES (?, ?, ?, ?)",
+            ("relay-1", "w-1", "permission", '{"message": "allow bash?"}'),
+        )
+        conn.commit()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT relay_id, relay_type, status FROM pending_relays WHERE relay_id = ?",
+            ("relay-1",),
+        )
+        row = cursor.fetchone()
+        conn.close()
+        assert row[0] == "relay-1"
+        assert row[1] == "permission"
+        assert row[2] == "pending"  # default
+
+
+class TestCheckConstraints:
+    def test_invalid_caller_type_raises(self, initialized_db):
+        conn = sqlite3.connect(initialized_db)
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO callers (caller_id, caller_type) VALUES (?, ?)",
+                ("c-bad", "invalid_type"),
+            )
+            conn.commit()
+        conn.close()
+
+    def test_valid_caller_types_accepted(self, initialized_db):
+        conn = sqlite3.connect(initialized_db)
+        conn.execute(
+            "INSERT INTO callers (caller_id, caller_type) VALUES (?, ?)", ("c-cma", "cma")
+        )
+        conn.execute(
+            "INSERT INTO callers (caller_id, caller_type) VALUES (?, ?)", ("c-local", "local")
+        )
+        conn.commit()
+        conn.close()
+
+    def test_invalid_relay_type_raises(self, initialized_db):
+        conn = sqlite3.connect(initialized_db)
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO pending_relays (relay_id, worker_id, relay_type, details)"
+                " VALUES (?, ?, ?, ?)",
+                ("r-bad", "w-1", "invalid_type", "{}"),
+            )
+            conn.commit()
+        conn.close()
+
+    def test_valid_relay_types_accepted(self, initialized_db):
+        conn = sqlite3.connect(initialized_db)
+        conn.execute(
+            "INSERT INTO pending_relays (relay_id, worker_id, relay_type, details)"
+            " VALUES (?, ?, ?, ?)",
+            ("r-perm", "w-1", "permission", "{}"),
+        )
+        conn.execute(
+            "INSERT INTO pending_relays (relay_id, worker_id, relay_type, details)"
+            " VALUES (?, ?, ?, ?)",
+            ("r-ask", "w-1", "ask", "{}"),
+        )
+        conn.commit()
         conn.close()
 
 
 class TestConnectionContextManager:
-    """Tests for connection() context manager."""
-    
-    def test_yields_valid_connection(self, temp_db):
-        """connection() context manager yields valid Connection."""
-        init_schema(temp_db)
-        
-        with connection(temp_db) as conn:
-            assert isinstance(conn, sqlite3.Connection)
-            cursor = conn.cursor()
-            cursor.execute("SELECT 1")
-            result = cursor.fetchone()
-            assert result == (1,)
-    
-    def test_closes_connection_after_context_exit(self, temp_db):
-        """connection() closes the connection when context exits."""
-        init_schema(temp_db)
-        
-        with connection(temp_db) as conn:
+    def test_commits_on_clean_exit(self, initialized_db):
+        with connection(initialized_db) as conn:
+            conn.execute(
+                "INSERT INTO callers (caller_id, caller_type) VALUES (?, ?)",
+                ("c-commit", "local"),
+            )
+
+        verify = sqlite3.connect(initialized_db)
+        cursor = verify.cursor()
+        cursor.execute("SELECT caller_id FROM callers WHERE caller_id = ?", ("c-commit",))
+        assert cursor.fetchone() is not None
+        verify.close()
+
+    def test_rollback_on_exception(self, initialized_db):
+        try:
+            with connection(initialized_db) as conn:
+                conn.execute(
+                    "INSERT INTO callers (caller_id, caller_type) VALUES (?, ?)",
+                    ("c-rollback", "local"),
+                )
+                raise RuntimeError("boom")
+        except RuntimeError:
             pass
-        
-        # Trying to use connection after context should fail
+
+        verify = sqlite3.connect(initialized_db)
+        cursor = verify.cursor()
+        cursor.execute("SELECT caller_id FROM callers WHERE caller_id = ?", ("c-rollback",))
+        assert cursor.fetchone() is None
+        verify.close()
+
+    def test_closes_after_clean_exit(self, initialized_db):
+        with connection(initialized_db) as conn:
+            pass
+
         with pytest.raises(sqlite3.ProgrammingError):
             conn.cursor()
-    
-    def test_closes_connection_on_exception(self, temp_db):
-        """connection() closes connection even when exception occurs."""
-        init_schema(temp_db)
-        
+
+    def test_closes_after_exception(self, initialized_db):
         try:
-            with connection(temp_db) as conn:
-                raise ValueError("Test exception")
+            with connection(initialized_db) as conn:
+                raise ValueError("test")
         except ValueError:
             pass
-        
-        # Connection should still be closed
+
         with pytest.raises(sqlite3.ProgrammingError):
             conn.cursor()
-    
-    def test_rollback_on_exception(self, temp_db):
-        """connection() rolls back uncommitted changes on exception."""
-        init_schema(temp_db)
-        
-        # Insert initial data and commit
-        with connection(temp_db) as conn:
-            cursor = conn.cursor()
-            cursor.execute("INSERT INTO state (key, repo, status, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)", ("rollback_test", "/repo/test", "initial"))
-            conn.commit()
-        
-        # Try to update but raise an exception before commit
-        try:
-            with connection(temp_db) as conn:
-                cursor = conn.cursor()
-                cursor.execute("UPDATE state SET status = ? WHERE key = ?", ("updated", "rollback_test"))
-                # Don't commit - raise exception
-                raise ValueError("Simulated error")
-        except ValueError:
-            pass
-        
-        # Verify original value is preserved (rollback occurred)
-        with connection(temp_db) as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT status FROM state WHERE key = ?", ("rollback_test",))
-            result = cursor.fetchone()
-            assert result[0] == "initial", "Uncommitted change should have been rolled back"
-    
-    def test_can_perform_database_operations(self, temp_db):
-        """connection() can be used for real database operations."""
-        init_schema(temp_db)
-        
-        # Insert data
-        with connection(temp_db) as conn:
-            cursor = conn.cursor()
-            cursor.execute("INSERT INTO state (key, repo, status, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)", ("key1", "/repo/test", "status1"))
-            conn.commit()
-        
-        # Read data
-        with connection(temp_db) as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT status FROM state WHERE key = ?", ("key1",))
-            result = cursor.fetchone()
-            assert result[0] == "status1"
-    
-    def test_error_on_invalid_path(self):
-        """connection() raises error for invalid paths."""
-        with pytest.raises(sqlite3.Error) as exc_info:
-            with connection("/invalid/\x00/path/db.sqlite") as conn:
-                pass
-        assert "Failed to connect to database" in str(exc_info.value)
 
 
-class TestUpsertBehavior:
-    """Tests for INSERT OR REPLACE (UPSERT) behavior."""
-    
-    def test_insert_or_replace_creates_new_row(self, temp_db):
-        """INSERT OR REPLACE creates a new row when key doesn't exist."""
-        init_schema(temp_db)
-        
-        conn = sqlite3.connect(temp_db)
-        cursor = conn.cursor()
-        cursor.execute("INSERT OR REPLACE INTO state (key, repo, status, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)", ("new_key", "/repo/test", "new_status"))
-        conn.commit()
-        
-        cursor.execute("SELECT status FROM state WHERE key = ?", ("new_key",))
-        result = cursor.fetchone()
-        assert result is not None
-        assert result[0] == "new_status"
-        conn.close()
-    
-    def test_insert_or_replace_updates_existing_row(self, temp_db):
-        """INSERT OR REPLACE updates existing row when key exists."""
-        init_schema(temp_db)
-        
-        conn = sqlite3.connect(temp_db)
-        cursor = conn.cursor()
-        
-        # Insert initial value
-        cursor.execute("INSERT INTO state (key, repo, status, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)", ("test_key", "/repo/test", "old_status"))
-        conn.commit()
-        
-        # Replace with new value
-        cursor.execute("INSERT OR REPLACE INTO state (key, repo, status, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)", ("test_key", "/repo/test", "new_status"))
-        conn.commit()
-        
-        # Verify updated
-        cursor.execute("SELECT status FROM state WHERE key = ?", ("test_key",))
-        result = cursor.fetchone()
-        assert result[0] == "new_status"
-        
-        # Verify only one row exists
-        cursor.execute("SELECT COUNT(*) FROM state WHERE key = ?", ("test_key",))
-        count = cursor.fetchone()[0]
-        assert count == 1
-        conn.close()
-    
-    def test_upsert_multiple_times_maintains_single_row(self, temp_db):
-        """Multiple UPSERT operations maintain single row per key."""
-        init_schema(temp_db)
-        
-        conn = sqlite3.connect(temp_db)
-        cursor = conn.cursor()
-        
-        # UPSERT same key multiple times
-        for i in range(5):
-            cursor.execute("INSERT OR REPLACE INTO state (key, repo, status, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)", ("test_key", "/repo/test", f"status_{i}"))
-            conn.commit()
-        
-        # Verify only one row exists with latest value
-        cursor.execute("SELECT status FROM state WHERE key = ?", ("test_key",))
-        result = cursor.fetchone()
-        assert result[0] == "status_4"
-        
-        cursor.execute("SELECT COUNT(*) FROM state WHERE key = ?", ("test_key",))
-        count = cursor.fetchone()[0]
-        assert count == 1
-        conn.close()
+class TestRowFactory:
+    def test_row_factory_is_sqlite_row(self, initialized_db):
+        with connection(initialized_db) as conn:
+            assert conn.row_factory is sqlite3.Row
+
+    def test_dict_like_column_access(self, initialized_db):
+        with connection(initialized_db) as conn:
+            conn.execute(
+                "INSERT INTO callers (caller_id, caller_type) VALUES (?, ?)",
+                ("c-row", "cma"),
+            )
+
+        with connection(initialized_db) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT caller_id, caller_type FROM callers WHERE caller_id = ?", ("c-row",)
+            )
+            row = cursor.fetchone()
+            assert row["caller_id"] == "c-row"
+            assert row["caller_type"] == "cma"
 
 
-class TestRepoColumn:
-    """Tests for repo column behavior in new schema."""
-    
-    def test_repo_column_stores_working_directory(self, temp_db):
-        """Verify repo column stores the working directory path."""
-        init_schema(temp_db)
-        
-        conn = sqlite3.connect(temp_db)
-        cursor = conn.cursor()
-        
-        # Insert entry with repo path
-        cursor.execute("INSERT INTO state (key, repo, status, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)", 
-                      ("session+123", "/home/user/projects/waggle", "working"))
-        conn.commit()
-        
-        # Verify repo column is populated correctly
-        cursor.execute("SELECT repo FROM state WHERE key = ?", ("session+123",))
-        result = cursor.fetchone()
-        assert result[0] == "/home/user/projects/waggle"
-        
-        conn.close()
-    
-    def test_different_repos_dont_collide(self, temp_db):
-        """Keys with different repos are isolated from each other."""
-        init_schema(temp_db)
-        
-        conn = sqlite3.connect(temp_db)
-        cursor = conn.cursor()
-        
-        # Insert keys with different repos
-        cursor.execute("INSERT INTO state (key, repo, status, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)", ("session+123", "/repo/path1", "status1"))
-        cursor.execute("INSERT INTO state (key, repo, status, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)", ("session+456", "/repo/path2", "status2"))
-        conn.commit()
-        
-        # Verify both keys exist independently
-        cursor.execute("SELECT status FROM state WHERE repo = ? AND key = ?", ("/repo/path1", "session+123"))
-        result1 = cursor.fetchone()
-        assert result1[0] == "status1"
-        
-        cursor.execute("SELECT status FROM state WHERE repo = ? AND key = ?", ("/repo/path2", "session+456"))
-        result2 = cursor.fetchone()
-        assert result2[0] == "status2"
-        
-        conn.close()
-    
-    def test_same_session_name_different_repos_isolated(self, temp_db):
-        """Different session IDs in different repos creates separate entries."""
-        init_schema(temp_db)
-        
-        conn = sqlite3.connect(temp_db)
-        cursor = conn.cursor()
-        
-        # Insert different session keys in different repos
-        cursor.execute("INSERT INTO state (key, repo, status, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)", ("my_session+001+111", "/home/user/repo1", "migrating database"))
-        cursor.execute("INSERT INTO state (key, repo, status, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)", ("my_session+002+222", "/home/user/repo2", "awaiting confirmation"))
-        conn.commit()
-        
-        # Verify both exist with different values
-        cursor.execute("SELECT COUNT(*) FROM state")
-        count = cursor.fetchone()[0]
-        assert count == 2
-        
-        cursor.execute("SELECT status FROM state WHERE repo = ? AND key = ?", ("/home/user/repo1", "my_session+001+111"))
-        assert cursor.fetchone()[0] == "migrating database"
-        
-        cursor.execute("SELECT status FROM state WHERE repo = ? AND key = ?", ("/home/user/repo2", "my_session+002+222"))
-        assert cursor.fetchone()[0] == "awaiting confirmation"
-        
-        conn.close()
-    
-    def test_repo_filtering_queries_by_repo_column(self, temp_db):
-        """Can filter entries by repo column."""
-        init_schema(temp_db)
-        
-        conn = sqlite3.connect(temp_db)
-        cursor = conn.cursor()
-        
-        # Insert multiple keys with different repos
-        cursor.execute("INSERT INTO state (key, repo, status, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)", ("session1+001+111", "/repo/a", "status1"))
-        cursor.execute("INSERT INTO state (key, repo, status, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)", ("session2+002+222", "/repo/a", "status2"))
-        cursor.execute("INSERT INTO state (key, repo, status, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)", ("session3+003+333", "/repo/b", "status3"))
-        conn.commit()
-        
-        # Query keys for specific repo using repo column
-        cursor.execute("SELECT key, status FROM state WHERE repo = ?", ("/repo/a",))
-        results = cursor.fetchall()
-        
-        assert len(results) == 2
-        assert all(key in ["session1+001+111", "session2+002+222"] for key, _ in results)
-        
-        conn.close()
-    
-    def test_multiple_repos_can_safely_use_same_database(self, temp_db):
-        """Multiple repos can use the same database without interference."""
-        init_schema(temp_db)
-        
-        conn = sqlite3.connect(temp_db)
-        cursor = conn.cursor()
-        
-        # Simulate multiple repos writing to database
-        repos = ["/home/user/project1", "/home/user/project2", "/var/www/app"]
-        for i, repo in enumerate(repos):
-            cursor.execute("INSERT INTO state (key, repo, status, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)", (f"test+{i:03d}", repo, f"status_for_{repo}"))
-        conn.commit()
-        
-        # Verify all repos' data is present and isolated
-        cursor.execute("SELECT COUNT(*) FROM state")
-        assert cursor.fetchone()[0] == 3
-        
-        for repo in repos:
-            cursor.execute("SELECT status FROM state WHERE repo = ?", (repo,))
-            result = cursor.fetchone()
-            assert result[0] == f"status_for_{repo}"
-        
-        conn.close()
+class TestCreatesParentDirectory:
+    def test_creates_nested_parent_dirs(self, tmp_path):
+        db_path = str(tmp_path / "a" / "b" / "c" / "test.db")
+        assert not (tmp_path / "a").exists()
+        init_schema(db_path)
+        assert Path(db_path).exists()

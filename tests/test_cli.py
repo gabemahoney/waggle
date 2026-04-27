@@ -1,10 +1,9 @@
 """Unit tests for the CLI dispatcher."""
 
 import sys
-import json
 
 import pytest
-from unittest.mock import patch, AsyncMock
+from unittest.mock import patch
 
 from waggle.cli import main
 
@@ -32,9 +31,9 @@ class TestCLIHelp:
 
 
 class TestServeSubcommand:
-    def test_serve_calls_server_run(self, monkeypatch):
+    def test_serve_calls_daemon_run(self, monkeypatch):
         monkeypatch.setattr(sys, "argv", ["waggle", "serve"])
-        with patch("waggle.server.run") as mock_run:
+        with patch("waggle.daemon.run") as mock_run:
             main()
             mock_run.assert_called_once_with()
 
@@ -56,143 +55,33 @@ class TestUsageErrors:
         assert captured.err == ""
 
 
-class TestListAgents:
-    @pytest.mark.parametrize("argv,expected_kwargs", [
-        (["waggle", "list-agents"], {"name": None, "repo": None, "ctx": None}),
-        (["waggle", "list-agents", "--name", "foo", "--repo", "/bar"], {"name": "foo", "repo": "/bar", "ctx": None}),
-        (["waggle", "list-agents", "--name", "foo"], {"name": "foo", "repo": None, "ctx": None}),
-    ])
-    def test_list_agents_args(self, monkeypatch, argv, expected_kwargs):
-        monkeypatch.setattr(sys, "argv", argv)
-        with patch("waggle.server.list_agents", new_callable=AsyncMock) as mock_fn:
-            mock_fn.return_value = {"status": "success", "agents": []}
-            with pytest.raises(SystemExit) as exc:
-                main()
-            assert exc.value.code == 0
-            mock_fn.assert_called_once_with(**expected_kwargs)
+class TestSetStateSubcommand:
+    def test_set_state_help_exits_0(self, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["waggle", "set-state", "--help"])
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+        assert exc_info.value.code == 0
+
+    def test_set_state_calls_handler(self, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["waggle", "set-state"])
+        with patch("waggle.cli._handle_set_state") as mock_handler:
+            main()
+            mock_handler.assert_called_once()
+            args = mock_handler.call_args[0][0]
+            assert args.delete is False
+
+    def test_set_state_delete_flag(self, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["waggle", "set-state", "--delete"])
+        with patch("waggle.cli._handle_set_state") as mock_handler:
+            main()
+            mock_handler.assert_called_once()
+            args = mock_handler.call_args[0][0]
+            assert args.delete is True
 
 
-class TestSpawnAgent:
-    def test_spawn_agent_calls_function(self, monkeypatch):
-        monkeypatch.setattr(sys, "argv", [
-            "waggle", "spawn-agent", "--repo", "/r", "--session-name", "s", "--agent", "claude"
-        ])
-        with patch("waggle.server.spawn_agent", new_callable=AsyncMock) as mock_fn:
-            mock_fn.return_value = {"status": "success"}
-            with pytest.raises(SystemExit) as exc:
-                main()
-            assert exc.value.code == 0
-            mock_fn.assert_called_once_with(
-                "/r", "s", "claude",
-                model=None, command=None, settings=None, ctx=None
-            )
-
-
-class TestDeleteRepoAgents:
-    def test_delete_repo_agents_default_cwd(self, monkeypatch):
-        import os
-        monkeypatch.setattr(sys, "argv", ["waggle", "delete-repo-agents"])
-        with patch("waggle.server.delete_repo_agents", new_callable=AsyncMock) as mock_fn:
-            mock_fn.return_value = {"status": "success"}
-            with pytest.raises(SystemExit) as exc:
-                main()
-            assert exc.value.code == 0
-            mock_fn.assert_called_once_with(repo_root=os.getcwd(), ctx=None)
-
-    def test_delete_repo_agents_explicit_root(self, monkeypatch):
-        monkeypatch.setattr(sys, "argv", ["waggle", "delete-repo-agents", "--repo-root", "/some/path"])
-        with patch("waggle.server.delete_repo_agents", new_callable=AsyncMock) as mock_fn:
-            mock_fn.return_value = {"status": "success"}
-            with pytest.raises(SystemExit) as exc:
-                main()
-            assert exc.value.code == 0
-            mock_fn.assert_called_once_with(repo_root="/some/path", ctx=None)
-
-
-class TestCloseSession:
-    def test_close_session_force_flag(self, monkeypatch):
-        monkeypatch.setattr(sys, "argv", ["waggle", "close-session", "--session-id", "$1", "--force"])
-        with patch("waggle.server.close_session", new_callable=AsyncMock) as mock_fn:
-            mock_fn.return_value = {"status": "success"}
-            with pytest.raises(SystemExit) as exc:
-                main()
-            assert exc.value.code == 0
-            mock_fn.assert_called_once_with("$1", session_name=None, force=True)
-
-
-class TestLifecycleExitCodes:
-    def test_lifecycle_exits_1_on_error(self, monkeypatch):
-        monkeypatch.setattr(sys, "argv", ["waggle", "list-agents"])
-        with patch("waggle.server.list_agents", new_callable=AsyncMock) as mock_fn:
-            mock_fn.return_value = {"status": "error", "message": "db down"}
-            with pytest.raises(SystemExit) as exc:
-                main()
-            assert exc.value.code == 1
-
-
-class TestReadPane:
-    def test_read_pane_default_args(self, monkeypatch):
-        monkeypatch.setattr(sys, "argv", ["waggle", "read-pane", "--session-id", "$1"])
-        with patch("waggle.server.read_pane", new_callable=AsyncMock) as mock_fn:
-            mock_fn.return_value = {"status": "success", "agent_state": "waiting", "content": "..."}
-            with pytest.raises(SystemExit) as exc:
-                main()
-            assert exc.value.code == 0
-            mock_fn.assert_called_once_with("$1", None, 50)  # pane_id=None, scrollback=50
-
-    def test_read_pane_scrollback_override(self, monkeypatch):
-        monkeypatch.setattr(sys, "argv", ["waggle", "read-pane", "--session-id", "$1", "--scrollback", "100"])
-        with patch("waggle.server.read_pane", new_callable=AsyncMock) as mock_fn:
-            mock_fn.return_value = {"status": "success", "agent_state": "waiting", "content": ""}
-            with pytest.raises(SystemExit) as exc:
-                main()
-            assert exc.value.code == 0
-            mock_fn.assert_called_once_with("$1", None, 100)
-
-    def test_read_pane_with_pane_id(self, monkeypatch):
-        monkeypatch.setattr(sys, "argv", ["waggle", "read-pane", "--session-id", "$1", "--pane-id", "%2"])
-        with patch("waggle.server.read_pane", new_callable=AsyncMock) as mock_fn:
-            mock_fn.return_value = {"status": "success", "agent_state": "waiting", "content": ""}
-            with pytest.raises(SystemExit) as exc:
-                main()
-            assert exc.value.code == 0
-            mock_fn.assert_called_once_with("$1", "%2", 50)
-
-
-class TestSendCommand:
-    def test_send_command_basic(self, monkeypatch):
-        monkeypatch.setattr(sys, "argv", ["waggle", "send-command", "--session-id", "$1", "--command", "1"])
-        with patch("waggle.server.send_command", new_callable=AsyncMock) as mock_fn:
-            mock_fn.return_value = {"status": "success", "message": "command delivered"}
-            with pytest.raises(SystemExit) as exc:
-                main()
-            assert exc.value.code == 0
-            mock_fn.assert_called_once_with("$1", "1", None, None)
-
-    def test_send_command_with_custom_text(self, monkeypatch):
-        monkeypatch.setattr(sys, "argv", ["waggle", "send-command", "--session-id", "$1", "--command", "3", "--custom-text", "hello"])
-        with patch("waggle.server.send_command", new_callable=AsyncMock) as mock_fn:
-            mock_fn.return_value = {"status": "success", "message": "command delivered"}
-            with pytest.raises(SystemExit) as exc:
-                main()
-            assert exc.value.code == 0
-            mock_fn.assert_called_once_with("$1", "3", None, "hello")
-
-    def test_send_command_with_pane_id(self, monkeypatch):
-        monkeypatch.setattr(sys, "argv", ["waggle", "send-command", "--session-id", "$1", "--command", "1", "--pane-id", "%2"])
-        with patch("waggle.server.send_command", new_callable=AsyncMock) as mock_fn:
-            mock_fn.return_value = {"status": "success", "message": "command delivered"}
-            with pytest.raises(SystemExit) as exc:
-                main()
-            assert exc.value.code == 0
-            mock_fn.assert_called_once_with("$1", "1", "%2", None)
-
-
-class TestSessionInteractionExitCodes:
-    def test_session_interaction_error_exits_1(self, monkeypatch):
-        monkeypatch.setattr(sys, "argv", ["waggle", "read-pane", "--session-id", "$1"])
-        with patch("waggle.server.read_pane", new_callable=AsyncMock) as mock_fn:
-            mock_fn.return_value = {"status": "error", "message": "session not found"}
-            with pytest.raises(SystemExit) as exc:
-                main()
-            assert exc.value.code == 1
+class TestStingSubcommand:
+    def test_sting_calls_handle_sting(self, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["waggle", "sting"])
+        with patch("waggle.sting.handle_sting") as mock_handler:
+            main()
+            mock_handler.assert_called_once()
