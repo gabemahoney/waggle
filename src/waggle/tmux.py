@@ -7,7 +7,9 @@ Server() is instantiated per-call (no module-level side effects).
 
 import asyncio
 import re
+import subprocess
 from pathlib import Path
+from urllib.parse import urlparse
 
 import libtmux
 from libtmux.exc import LibTmuxException
@@ -38,29 +40,10 @@ def get_sessions() -> list[dict]:
         return []
 
 
-def get_active_session_keys() -> set[str]:
-    """Get composite keys for all active tmux sessions.
-
-    Returns set of strings in format "{name}+{session_id}+{created}".
-    Replaces the TMUX_FMT_KEYS_ONLY subprocess pattern used by
-    cleanup_dead_sessions for orphan detection.
-
-    Returns empty set if tmux is unavailable or any error occurs.
-    """
-    try:
-        sessions = get_sessions()
-        return {
-            f"{s['session_name']}+{s['session_id']}+{s['session_created']}"
-            for s in sessions
-        }
-    except Exception:
-        return set()
-
-
 def is_llm_running(pane: libtmux.Pane) -> bool:
     """Check if a pane is running an LLM agent.
 
-    Checks pane_current_command for 'claude' or 'opencode' (case-insensitive).
+    Checks pane_current_command for 'claude' (case-insensitive).
     Single tmux query only — no process tree walking, no pgrep/psutil (SR-8.1).
 
     Args:
@@ -73,7 +56,7 @@ def is_llm_running(pane: libtmux.Pane) -> bool:
         cmd = pane.pane_current_command
         if cmd is None:
             return False
-        return cmd.lower() in ("claude", "opencode")
+        return cmd.lower() == "claude"
     except Exception:
         return False
 
@@ -81,11 +64,6 @@ def is_llm_running(pane: libtmux.Pane) -> bool:
 async def get_sessions_async() -> list[dict]:
     """Async wrapper for get_sessions()."""
     return await asyncio.to_thread(get_sessions)
-
-
-async def get_active_session_keys_async() -> set[str]:
-    """Async wrapper for get_active_session_keys()."""
-    return await asyncio.to_thread(get_active_session_keys)
 
 
 def _kill_session_sync(session_id: str) -> dict:
@@ -110,38 +88,6 @@ async def kill_session(session_id: str) -> dict:
         {"status": "success"} or {"status": "error", "message": ...}
     """
     return await asyncio.to_thread(_kill_session_sync, session_id)
-
-
-def _validate_session_name_id_sync(session_id: str, session_name: str) -> dict:
-    try:
-        server = libtmux.Server()
-        session = server.sessions.get(session_id=session_id)
-        if session.session_name == session_name:
-            return {"status": "success"}
-        return {
-            "status": "error",
-            "message": (
-                f"Session name mismatch: expected '{session_name}', "
-                f"found '{session.session_name}'"
-            ),
-        }
-    except LibTmuxException as e:
-        return {"status": "error", "message": str(e)}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-
-async def validate_session_name_id(session_id: str, session_name: str) -> dict:
-    """Validate that a tmux session ID maps to the expected session name.
-
-    Args:
-        session_id: The tmux session ID (e.g. "$1").
-        session_name: The expected session name.
-
-    Returns:
-        {"status": "success"} or {"status": "error", "message": ...}
-    """
-    return await asyncio.to_thread(_validate_session_name_id_sync, session_id, session_name)
 
 
 def _check_llm_running_sync(session_id: str) -> bool:
@@ -201,116 +147,8 @@ async def capture_pane(session_id: str, pane_id: str | None = None, scrollback: 
     return await asyncio.to_thread(_capture_pane_sync, session_id, pane_id, scrollback)
 
 
-def _validate_pane_id_sync(session_id: str, pane_id: str) -> dict:
-    try:
-        server = libtmux.Server()
-        session = server.sessions.get(session_id=session_id)
-        pane = server.panes.get(pane_id=pane_id)
-        if pane.session_id != session_id:
-            return {
-                "status": "error",
-                "message": f"Pane '{pane_id}' does not belong to session '{session_id}'",
-            }
-        return {"status": "success"}
-    except LibTmuxException as e:
-        return {"status": "error", "message": str(e)}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
 
-
-async def validate_pane_id(session_id: str, pane_id: str) -> dict:
-    """Validate that a pane ID belongs to the given session.
-
-    Args:
-        session_id: The tmux session ID (e.g. "$1").
-        pane_id: The pane ID to validate.
-
-    Returns:
-        {"status": "success"} or {"status": "error", "message": str}
-    """
-    return await asyncio.to_thread(_validate_pane_id_sync, session_id, pane_id)
-
-
-def _resolve_pane(server: libtmux.Server, session_id: str, pane_id: str | None):
-    """Resolve a pane object from session_id and optional pane_id.
-
-    Raises LibTmuxException or ValueError on failure.
-    Returns (pane, error_dict) where error_dict is None on success.
-    """
-    session = server.sessions.get(session_id=session_id)
-    if pane_id is None:
-        return session.active_window.active_pane, None
-    pane = server.panes.get(pane_id=pane_id)
-    if pane.session_id != session_id:
-        return None, {
-            "status": "error",
-            "message": f"Pane '{pane_id}' does not belong to session '{session_id}'",
-        }
-    return pane, None
-
-
-def _send_keys_to_pane_sync(session_id: str, text: str, pane_id: str | None, enter: bool) -> dict:
-    try:
-        server = libtmux.Server()
-        pane, err = _resolve_pane(server, session_id, pane_id)
-        if err:
-            return err
-        pane.send_keys(text, enter=enter)
-        return {"status": "success"}
-    except LibTmuxException as e:
-        return {"status": "error", "message": str(e)}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-
-async def send_keys_to_pane(
-    session_id: str,
-    text: str,
-    pane_id: str | None = None,
-    enter: bool = True,
-) -> dict:
-    """Send keys to a tmux pane.
-
-    Args:
-        session_id: The tmux session ID (e.g. "$1").
-        text: The text/keys to send.
-        pane_id: Optional pane ID. If None, uses the active pane.
-        enter: If True, sends Enter after the text.
-
-    Returns:
-        {"status": "success"} or {"status": "error", "message": str}
-    """
-    return await asyncio.to_thread(_send_keys_to_pane_sync, session_id, text, pane_id, enter)
-
-
-def _clear_pane_input_sync(session_id: str, pane_id: str | None) -> dict:
-    try:
-        server = libtmux.Server()
-        pane, err = _resolve_pane(server, session_id, pane_id)
-        if err:
-            return err
-        pane.send_keys("C-c", enter=False)
-        return {"status": "success"}
-    except LibTmuxException as e:
-        return {"status": "error", "message": str(e)}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-
-async def clear_pane_input(session_id: str, pane_id: str | None = None) -> dict:
-    """Send Ctrl+C to clear partial input in a tmux pane.
-
-    Args:
-        session_id: The tmux session ID (e.g. "$1").
-        pane_id: Optional pane ID. If None, uses the active pane.
-
-    Returns:
-        {"status": "success"} or {"status": "error", "message": str}
-    """
-    return await asyncio.to_thread(_clear_pane_input_sync, session_id, pane_id)
-
-
-def _create_session_sync(session_name: str, repo_path: str) -> dict:
+def _create_session_sync(session_name: str, repo_path: str, worker_id: str) -> dict:
     try:
         server = libtmux.Server()
         session = server.new_session(
@@ -319,11 +157,13 @@ def _create_session_sync(session_name: str, repo_path: str) -> dict:
             attach=False,
             environment={"VIRTUAL_ENV": "", "VIRTUAL_ENV_PROMPT": ""},
         )
+        session.set_environment("WAGGLE_WORKER_ID", worker_id)
         return {
             "status": "success",
             "session_id": session.session_id,
             "session_name": session.session_name,
             "session_created": session.session_created,
+            "worker_id": worker_id,
         }
     except LibTmuxException as e:
         return {"status": "error", "message": str(e)}
@@ -331,33 +171,34 @@ def _create_session_sync(session_name: str, repo_path: str) -> dict:
         return {"status": "error", "message": str(e)}
 
 
-async def create_session(session_name: str, repo_path: str) -> dict:
+async def create_session(session_name: str, repo_path: str, worker_id: str) -> dict:
     """Create a new tmux session at the given directory.
+
+    Sets the WAGGLE_WORKER_ID environment variable in the session.
 
     Args:
         session_name: Name for the new tmux session.
         repo_path: Absolute path to use as the session's start directory.
+        worker_id: Worker UUID to set as WAGGLE_WORKER_ID in the session env.
 
     Returns:
-        {"status": "success", "session_id": str, "session_name": str, "session_created": str}
+        {"status": "success", "session_id": str, "session_name": str,
+         "session_created": str, "worker_id": str}
         or {"status": "error", "message": str}
     """
-    return await asyncio.to_thread(_create_session_sync, session_name, repo_path)
+    return await asyncio.to_thread(_create_session_sync, session_name, repo_path, worker_id)
 
 
 def _launch_agent_in_pane_sync(
     session_id: str,
-    agent: str,
-    model: str | None,
+    model: str,
     settings: str | None,
 ) -> dict:
     try:
         server = libtmux.Server()
         session = server.sessions.get(session_id=session_id)
         pane = session.active_window.active_pane
-        cmd = agent.lower()
-        if model:
-            cmd += f" --model {model.lower()}"
+        cmd = f"claude --model {model.lower()}"
         if settings:
             # Only allow characters valid in CLI flags to prevent shell injection
             if re.search(r'[;&|`$(){}\\<>]', settings):
@@ -373,67 +214,76 @@ def _launch_agent_in_pane_sync(
 
 async def launch_agent_in_pane(
     session_id: str,
-    agent: str,
-    model: str | None = None,
+    model: str,
     settings: str | None = None,
 ) -> dict:
-    """Send an LLM agent launch command to the active pane of a session.
+    """Send a claude launch command to the active pane of a session.
 
     Args:
         session_id: The tmux session ID (e.g. "$1").
-        agent: Agent binary name, "claude" or "opencode".
-        model: Optional model name (e.g. "sonnet", "haiku", "opus").
+        model: Model name (e.g. "sonnet", "haiku", "opus").
         settings: Optional extra CLI flags (e.g. "--dangerously-skip-permissions").
 
     Returns:
         {"status": "success"} or {"status": "error", "message": str}
     """
-    return await asyncio.to_thread(_launch_agent_in_pane_sync, session_id, agent, model, settings)
+    return await asyncio.to_thread(_launch_agent_in_pane_sync, session_id, model, settings)
 
 
-def _resolve_session_sync(session_name: str, repo_path: str) -> dict:
-    try:
-        server = libtmux.Server()
-        try:
-            session = server.sessions.get(session_name=session_name)
-        except Exception:
-            return {"action": "create"}
+def clone_or_update_repo(repo: str, repos_path: str) -> str:
+    """Clone or update a git repository.
 
-        # Session exists — check LLM
-        pane = session.active_window.active_pane
-        if is_llm_running(pane):
-            return {"action": "error", "message": "LLM already running in session"}
-
-        # No LLM — compare repo paths
-        session_path = session.session_path or ""
-        if Path(session_path).resolve() == Path(repo_path).resolve():
-            return {
-                "action": "reuse",
-                "session_id": session.session_id,
-                "session_name": session.session_name,
-                "session_created": session.session_created,
-            }
-        return {"action": "error", "message": "session exists but is in wrong repo"}
-    except LibTmuxException as e:
-        return {"action": "error", "message": str(e)}
-    except Exception as e:
-        return {"action": "error", "message": str(e)}
-
-
-async def resolve_session(session_name: str, repo_path: str) -> dict:
-    """Resolve session creation/reuse strategy (SR-6.2).
-
-    Cases:
-    1. Session doesn't exist → {action: "create"}
-    2. Session exists + LLM running → {action: "error", message: "LLM already running in session"}
-    3. Session exists + no LLM + same repo → {action: "reuse", session_id, session_name, session_created}
-    4. Session exists + no LLM + different repo → {action: "error", message: "session exists but is in wrong repo"}
+    If repo is a local path (not starting with https://), returns it unchanged.
+    If repo is a GitHub HTTPS URL, clones to {repos_path}/{owner}/{repo_name}.
+    If the clone already exists, runs git fetch origin && git reset --hard origin/HEAD.
 
     Args:
-        session_name: tmux session name to check.
-        repo_path: Absolute path to compare against the session's working directory.
+        repo: Local path or GitHub HTTPS URL.
+        repos_path: Base directory for cloned repositories.
 
     Returns:
-        dict with "action" key ("create", "reuse", or "error")
+        Absolute local path to the repository.
+
+    Raises:
+        ValueError: If the URL cannot be parsed.
+        subprocess.CalledProcessError: If git commands fail.
     """
-    return await asyncio.to_thread(_resolve_session_sync, session_name, repo_path)
+    if not repo.startswith("https://"):
+        return repo
+
+    parsed = urlparse(repo)
+    # Strip leading slash and .git suffix for path parsing
+    path_parts = parsed.path.strip("/").removesuffix(".git").split("/")
+    if len(path_parts) < 2:
+        raise ValueError(f"Cannot parse owner/repo from URL: {repo}")
+    owner, repo_name = path_parts[0], path_parts[1]
+
+    local_path = Path(repos_path) / owner / repo_name
+
+    if local_path.exists():
+        subprocess.run(
+            ["git", "fetch", "origin"],
+            cwd=str(local_path),
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "reset", "--hard", "origin/HEAD"],
+            cwd=str(local_path),
+            check=True,
+            capture_output=True,
+        )
+    else:
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(
+            ["git", "clone", repo, str(local_path)],
+            check=True,
+            capture_output=True,
+        )
+
+    return str(local_path)
+
+
+async def clone_or_update_repo_async(repo: str, repos_path: str) -> str:
+    """Async wrapper for clone_or_update_repo()."""
+    return await asyncio.to_thread(clone_or_update_repo, repo, repos_path)
