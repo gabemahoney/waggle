@@ -6,7 +6,7 @@ EXIT_CODE=0
 WAGGLE_PID=0
 
 finish() {
-  kill $WAGGLE_PID 2>/dev/null || true
+  [[ $WAGGLE_PID -gt 0 ]] && kill $WAGGLE_PID 2>/dev/null || true
   echo "$EXIT_CODE" > /tmp/waggle_phase_exit
   exit "$EXIT_CODE"
 }
