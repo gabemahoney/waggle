@@ -17,9 +17,20 @@ cat > "${HOME}/.claude.json" <<'EOF'
 {"numStartups":100,"hasCompletedOnboarding":true,"mcpServers":{},"projects":{}}
 EOF
 
-# Run integration tests
-if ! /opt/waggle/tests/integration.sh; then
-  echo "FAIL: integration tests failed" >&2
+# Install dependencies
+poetry install --no-interaction
+
+# Run pytest
+PYTHONPATH=src poetry run python3 -m pytest tests/ --ignore=tests/spikes -q --tb=short
+PYTEST_EXIT=$?
+
+# Exit code 5 means pytest collected 0 tests (e.g. import error silently skipped all)
+if [[ "$PYTEST_EXIT" -eq 5 ]]; then
+  echo "FAIL: pytest collected 0 tests (possible import error)" >&2
+  EXIT_CODE=1
+  finish
+elif [[ "$PYTEST_EXIT" -ne 0 ]]; then
+  echo "FAIL: pytest failed with exit code $PYTEST_EXIT" >&2
   EXIT_CODE=1
   finish
 fi
