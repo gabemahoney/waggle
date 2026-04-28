@@ -143,7 +143,8 @@ class TestTLSDaemonIntegration:
              patch("waggle.daemon.uvicorn.Server", return_value=mock_server), \
              patch("waggle.daemon.process_inbound", new=AsyncMock(return_value=None)), \
              patch("waggle.daemon.process_outbound", new=AsyncMock(return_value=None)), \
-             patch("waggle.daemon.monitor_state", new=AsyncMock(return_value=None)):
+             patch("waggle.daemon.monitor_state", new=AsyncMock(return_value=None)), \
+             patch("waggle.daemon.restart_recovery", new=AsyncMock(return_value={})):
             from waggle.daemon import _run
             await _run()
 

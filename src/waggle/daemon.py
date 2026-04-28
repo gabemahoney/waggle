@@ -13,6 +13,7 @@ from waggle.database import init_schema
 from waggle.inbound_processor import process_inbound
 from waggle.outbound_processor import process_outbound
 from waggle.queue import get_inbound_queue, get_outbound_queue
+from waggle.recovery import restart_recovery
 from waggle.state_monitor import monitor_state
 
 
@@ -57,6 +58,8 @@ async def _run() -> None:
 
     server1 = uvicorn.Server(config1)
     server2 = uvicorn.Server(config2)
+
+    await restart_recovery(outbound_q, db_path)
 
     # Uvicorn handles SIGTERM/SIGINT gracefully by default
     try:
