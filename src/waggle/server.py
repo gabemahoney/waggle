@@ -102,6 +102,19 @@ async def send_input(worker_id: str, text: str, ctx: Context = None) -> dict:
 
 
 @mcp.tool()
+async def approve_permission(worker_id: str, decision: str, ctx: Context = None) -> dict:
+    """Approve or deny a worker's pending permission request.
+
+    Args:
+        worker_id: Worker UUID with the pending permission request.
+        decision: "allow" or "deny".
+        ctx: MCP context (auto-injected).
+    """
+    caller_id = _get_caller_id(ctx)
+    return await engine.approve_permission(caller_id, worker_id, decision)
+
+
+@mcp.tool()
 async def terminate_worker(worker_id: str, force: bool = False, ctx: Context = None) -> dict:
     """Terminate a worker and clean up its resources.
 

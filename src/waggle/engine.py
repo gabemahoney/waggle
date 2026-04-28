@@ -281,6 +281,54 @@ async def send_input(caller_id: str, worker_id: str, text: str) -> dict:
     return {"worker_id": worker_id, "delivered": True}
 
 
+async def approve_permission(caller_id: str, worker_id: str, decision: str) -> dict:
+    """Approve or deny a worker's pending permission request.
+
+    Args:
+        caller_id: Caller performing the approval (scope check).
+        worker_id: Worker whose permission request to resolve.
+        decision: "allow" or "deny".
+
+    Returns:
+        {"worker_id": str, "delivered": True}
+        or {"error": "worker_not_found"} / {"error": "no_pending_permission"}
+    """
+    db_path = _db_path()
+
+    with database.connection(db_path) as conn:
+        row = conn.execute(
+            "SELECT worker_id FROM workers WHERE worker_id = ? AND caller_id = ?",
+            (worker_id, caller_id),
+        ).fetchone()
+
+    if row is None:
+        return {"error": "worker_not_found"}
+
+    with database.connection(db_path) as conn:
+        relay_row = conn.execute(
+            """
+            SELECT relay_id FROM pending_relays
+            WHERE worker_id = ? AND relay_type = 'permission' AND status = 'pending'
+            LIMIT 1
+            """,
+            (worker_id,),
+        ).fetchone()
+
+        if relay_row is None:
+            return {"error": "no_pending_permission"}
+
+        conn.execute(
+            """
+            UPDATE pending_relays
+            SET response = ?, status = 'resolved', resolved_at = CURRENT_TIMESTAMP
+            WHERE relay_id = ?
+            """,
+            (decision, relay_row["relay_id"]),
+        )
+
+    return {"worker_id": worker_id, "delivered": True}
+
+
 async def terminate_worker(caller_id: str, worker_id: str, force: bool = False) -> dict:
     """Terminate a worker and remove it from the database.
 
