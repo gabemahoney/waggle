@@ -8,6 +8,16 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route, Router
 
 from waggle import config, database, engine
+from waggle.queue import MessageEnvelope, MessageType, enqueue_inbound, get_inbound_queue
+
+# Module-level queue reference (set by daemon on startup)
+_inbound_queue = None
+
+
+def set_inbound_queue(queue):
+    global _inbound_queue
+    _inbound_queue = queue
+
 
 _MESSAGES = {
     "worker_not_found": "Worker not found or not owned by caller",
@@ -97,7 +107,7 @@ async def check_request(request: Request) -> JSONResponse:
 
 
 # ---------------------------------------------------------------------------
-# Async endpoints (stub — queue wiring comes in Task 3)
+# Async endpoints
 # ---------------------------------------------------------------------------
 
 
@@ -120,6 +130,19 @@ async def spawn_worker(request: Request) -> JSONResponse:
         "session_name": body.get("session_name"),
     })
     database.create_request(db_path, request_id, caller_id, "spawn_worker", params)
+    envelope = MessageEnvelope(
+        message_type=MessageType.INBOUND,
+        caller_id=caller_id,
+        payload={
+            "operation": "spawn_worker",
+            "request_id": request_id,
+            "model": body.get("model"),
+            "repo": body.get("repo"),
+            "session_name": body.get("session_name"),
+            "command": body.get("command"),
+        },
+    )
+    enqueue_inbound(_inbound_queue, envelope)
     return JSONResponse({"request_id": request_id}, status_code=202)
 
 
@@ -141,6 +164,17 @@ async def send_input(request: Request) -> JSONResponse:
     request_id = str(uuid.uuid4())
     params = json.dumps({"worker_id": worker_id, "text": body.get("text")})
     database.create_request(db_path, request_id, caller_id, "send_input", params)
+    envelope = MessageEnvelope(
+        message_type=MessageType.INBOUND,
+        caller_id=caller_id,
+        payload={
+            "operation": "send_input",
+            "request_id": request_id,
+            "worker_id": worker_id,
+            "text": body.get("text"),
+        },
+    )
+    enqueue_inbound(_inbound_queue, envelope)
     return JSONResponse({"request_id": request_id}, status_code=202)
 
 
@@ -161,6 +195,16 @@ async def terminate_worker(request: Request) -> JSONResponse:
     request_id = str(uuid.uuid4())
     params = json.dumps({"worker_id": worker_id})
     database.create_request(db_path, request_id, caller_id, "terminate_worker", params)
+    envelope = MessageEnvelope(
+        message_type=MessageType.INBOUND,
+        caller_id=caller_id,
+        payload={
+            "operation": "terminate_worker",
+            "request_id": request_id,
+            "worker_id": worker_id,
+        },
+    )
+    enqueue_inbound(_inbound_queue, envelope)
     return JSONResponse({"request_id": request_id}, status_code=202)
 
 
