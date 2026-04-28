@@ -196,6 +196,45 @@ Terminate a worker and clean up its tmux session and database row.
 
 **Returns:** `{"worker_id": str, "terminated": true}` or `{"error": "worker_not_found"}`
 
+### `send_input`
+
+Send text input to a worker via Claude Channels notification.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `worker_id` | `str` | Yes | Worker UUID |
+| `text` | `str` | Yes | Text content to deliver |
+
+**Returns:** `{"worker_id": str, "delivered": true}` or `{"error": "worker_not_found"}` / `{"error": "worker_not_connected"}`
+
+### `approve_permission`
+
+Approve or deny a worker's pending permission request.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `worker_id` | `str` | Yes | Worker UUID |
+| `decision` | `str` | Yes | "allow" or "deny" |
+
+**Returns:** `{"worker_id": str, "delivered": true}` or `{"error": "worker_not_found"}` / `{"error": "no_pending_permission"}`
+
+### `answer_question`
+
+Answer a worker's pending AskUserQuestion.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `worker_id` | `str` | Yes | Worker UUID |
+| `answer` | `str` | Yes | The answer text |
+
+**Returns:** `{"worker_id": str, "delivered": true}` or `{"error": "worker_not_found"}` / `{"error": "no_pending_question"}`
+
 ---
 
 ## Architecture

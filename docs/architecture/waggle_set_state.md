@@ -11,12 +11,15 @@ Defined in `src/waggle/cli.py` (`_handle_set_state`). Reads worker identity from
 | Invocation | Purpose |
 |---|---|
 | `waggle set-state` | Capture pane, parse state, update `workers` table |
+| `waggle set-state waiting` | Force state to `waiting` (used by hooks) |
+| `waggle set-state working` | Force state to `working` (used by hooks) |
 | `waggle set-state --delete` | Remove worker row (SessionEnd cleanup) |
 
 ### Arguments
 
 | Argument | Type | Required | Default | Description |
 |---|---|---|---|---|
+| `state` | positional | No | — | Force a specific state (e.g. `waiting`, `working`). If omitted, state is derived from pane capture. |
 | `--delete` | flag | No | `False` | Delete the worker row instead of updating it |
 
 ## Flow

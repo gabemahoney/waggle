@@ -68,7 +68,10 @@ async def check_status(request: Request) -> JSONResponse:
 async def get_output(request: Request) -> JSONResponse:
     caller_id = request.state.caller_id
     worker_id = request.path_params["id"]
-    scrollback = int(request.query_params.get("scrollback", "200"))
+    try:
+        scrollback = int(request.query_params.get("scrollback", "200"))
+    except (ValueError, TypeError):
+        return _err("invalid_scrollback_value", 400)
     result = await engine.get_output(caller_id, worker_id, scrollback)
     if "error" in result:
         return _err(result["error"], 404)
@@ -79,7 +82,10 @@ async def approve_permission(request: Request) -> JSONResponse:
     caller_id = request.state.caller_id
     worker_id = request.path_params["id"]
     body = await request.json()
-    result = await engine.approve_permission(caller_id, worker_id, body["decision"])
+    decision = body.get("decision")
+    if not decision:
+        return _err("missing_decision_field", 400)
+    result = await engine.approve_permission(caller_id, worker_id, decision)
     if "error" in result:
         code = 404 if result["error"] in ("worker_not_found", "no_pending_permission") else 400
         return _err(result["error"], code)
@@ -90,7 +96,10 @@ async def answer_question(request: Request) -> JSONResponse:
     caller_id = request.state.caller_id
     worker_id = request.path_params["id"]
     body = await request.json()
-    result = await engine.answer_question(caller_id, worker_id, body["answer"])
+    answer = body.get("answer")
+    if not answer:
+        return _err("missing_answer_field", 400)
+    result = await engine.answer_question(caller_id, worker_id, answer)
     if "error" in result:
         code = 404 if result["error"] in ("worker_not_found", "no_pending_question") else 400
         return _err(result["error"], code)
