@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-full \
     curl \
     git \
+    openssh-client \
     tmux \
     ca-certificates \
     gnupg \
@@ -50,7 +51,8 @@ ENV PATH="/home/waggle/.local/bin:/root/.local/bin:$PATH"
 # Copy container scripts
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY docker/phase1.sh /usr/local/bin/phase1.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/phase1.sh
+COPY docker/phase2.sh /usr/local/bin/phase2.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/phase1.sh /usr/local/bin/phase2.sh
 
 USER waggle
 WORKDIR /opt/waggle
