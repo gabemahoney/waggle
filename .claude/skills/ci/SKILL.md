@@ -18,22 +18,29 @@ Start Docker Desktop and retry.
 ```
 And stop.
 
-### Step 2 — Pre-flight: Retrieve Claude API key from macOS Keychain
+### Step 2 — Pre-flight: Retrieve Claude API key
 
 ```bash
-CLAUDE_API_KEY=$(security find-generic-password -s "Claude Code" -w 2>/dev/null || true)
+# Check env var first (works on Linux and macOS)
+CLAUDE_API_KEY="${ANTHROPIC_API_KEY:-}"
+
+# If not in env, try macOS Keychain
 if [[ -z "$CLAUDE_API_KEY" ]]; then
-  CREDS_JSON=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null || true)
-  if [[ -n "$CREDS_JSON" ]]; then
-    CLAUDE_API_KEY=$(python3 -c "
+  CLAUDE_API_KEY=$(security find-generic-password -s "Claude Code" -w 2>/dev/null || true)
+  if [[ -z "$CLAUDE_API_KEY" ]]; then
+    CREDS_JSON=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null || true)
+    if [[ -n "$CREDS_JSON" ]]; then
+      CLAUDE_API_KEY=$(python3 -c "
 import json, sys
 d = json.loads(sys.argv[1])
 print(d.get('claudeAiOauth', {}).get('accessToken', ''))
 " "$CREDS_JSON" 2>/dev/null || true)
+    fi
   fi
 fi
+
 if [[ -z "$CLAUDE_API_KEY" ]]; then
-  echo "No Claude Code credentials in Keychain. Run 'claude /login' first."
+  echo "No Claude API key found. Set ANTHROPIC_API_KEY or run 'claude /login' on macOS."
   exit 1
 fi
 ```
