@@ -1,0 +1,14 @@
+[Unit]
+Description=Waggle v2 Worker Orchestration Daemon
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/waggle serve
+Restart=on-failure
+RestartSec=5
+EnvironmentFile=-%h/.waggle/env
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

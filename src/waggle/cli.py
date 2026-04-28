@@ -205,6 +205,15 @@ def _handle_set_state(args):
                 conn.execute("DELETE FROM workers WHERE worker_id = ?", (worker_id,))
             sys.exit(0)
 
+        if getattr(args, "state", None) is not None:
+            with database.connection(db_path) as conn:
+                conn.execute(
+                    "UPDATE workers SET status = ?, updated_at = CURRENT_TIMESTAMP"
+                    " WHERE worker_id = ?",
+                    (args.state, worker_id),
+                )
+            sys.exit(0)
+
         with database.connection(db_path) as conn:
             row = conn.execute(
                 "SELECT session_id FROM workers WHERE worker_id = ?", (worker_id,)
@@ -255,6 +264,12 @@ def main():
     set_state_parser = subparsers.add_parser(
         "set-state",
         help="Update worker state from tmux pane content",
+    )
+    set_state_parser.add_argument(
+        "state",
+        nargs="?",
+        default=None,
+        help="State to set directly (waiting, working). Omit to derive from pane content.",
     )
     set_state_parser.add_argument("--delete", action="store_true", help="Remove the worker row (SessionEnd)")
 

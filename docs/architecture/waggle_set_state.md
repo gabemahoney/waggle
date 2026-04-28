@@ -48,13 +48,17 @@ Defined in `src/waggle/cli.py` (`_handle_set_state`). Reads worker identity from
 
 ## Hook Event Mapping
 
-Per SRD §5.4, Claude Code hooks invoke `waggle set-state` on the following events:
+Claude Code hooks invoke `waggle set-state` (and related commands) on the following events:
 
 | Claude Code Event | waggle CLI Invocation | Purpose |
 |---|---|---|
-| `UserPromptSubmit` | `waggle set-state` | Capture state after user input |
-| `Stop` | `waggle set-state` | Capture state when agent stops |
-| `SubagentStop` | `waggle set-state` | Capture state when subagent stops |
+| `PermissionRequest` | `waggle permission-request` | Relay permission decision to orchestrator |
+| `SessionStart` | `waggle set-state waiting` | Register worker as idle at session open |
+| `UserPromptSubmit` | `waggle set-state working` | Mark worker active after user input |
+| `PreToolUse` (AskUserQuestion) | `waggle ask-relay` | Relay question to orchestrator |
+| `PreToolUse` (other) | `waggle set-state working` | Mark worker active before tool execution |
+| `PostToolUse` | `waggle set-state working` | Mark worker active after tool execution |
+| `Stop` | `waggle set-state waiting` | Mark worker idle when agent stops |
 | `SessionEnd` | `waggle set-state --delete` | Clean up worker row |
 
 ## Output Capture

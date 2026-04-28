@@ -20,30 +20,26 @@ It exposes an MCP interface (via HTTP transport) for local orchestrators and a R
 ```bash
 git clone https://github.com/gabemahoney/waggle.git
 cd waggle
-poetry install
+./install.sh
 ```
 
-**Alternative install methods:**
-
-```bash
-pipx install .
-# or
-uv tool install .
-```
-
-New dependencies in v2: `starlette`, `uvicorn`, `fastmcp`.
-
-> Once waggle is published to PyPI, you can use `pipx install waggle` / `uv tool install waggle`.
+This installs Python dependencies, deploys the waggle systemd user service, and configures Claude hooks in `~/.claude/settings.json`.
 
 ## Quick Start
 
-**1. Start the daemon**
+**1. Install**
 
 ```bash
-waggle serve
+git clone https://github.com/gabemahoney/waggle.git
+cd waggle
+./install.sh
 ```
 
-This starts the HTTP daemon on `127.0.0.1:8422` (port is configurable — see Configuration).
+The daemon starts automatically as a systemd user service. Verify:
+
+```bash
+systemctl --user status waggle
+```
 
 **2. Register the MCP server with Claude Code**
 
@@ -57,32 +53,22 @@ Verify:
 claude mcp list
 ```
 
-**3. Configure Claude hooks**
+**3. Verify hooks**
 
-Add to `~/.claude/settings.json` so workers automatically update their state in the database:
+`install.sh` automatically merges the following hooks into `~/.claude/settings.json`:
 
-```json
-{
-  "hooks": {
-    "UserPromptSubmit": [
-      { "hooks": [{ "type": "command", "command": "waggle set-state" }] }
-    ],
-    "Stop": [
-      { "hooks": [{ "type": "command", "command": "waggle set-state" }] }
-    ],
-    "SubagentStop": [
-      { "hooks": [{ "type": "command", "command": "waggle set-state" }] }
-    ],
-    "SessionEnd": [
-      { "hooks": [{ "type": "command", "command": "waggle set-state --delete" }] }
-    ]
-  }
-}
-```
+| Event | Command |
+|-------|---------|
+| `PermissionRequest` | `waggle permission-request` |
+| `SessionStart` | `waggle set-state waiting` |
+| `UserPromptSubmit` | `waggle set-state working` |
+| `PreToolUse` (AskUserQuestion) | `waggle ask-relay` |
+| `PreToolUse` (other tools) | `waggle set-state working` |
+| `PostToolUse` | `waggle set-state working` |
+| `Stop` | `waggle set-state waiting` |
+| `SessionEnd` | `waggle set-state --delete` |
 
-`waggle set-state` reads the tmux pane content, classifies the agent state, and updates the workers table. `waggle set-state --delete` removes the worker row on session end.
-
-Restart Claude Code after modifying configuration.
+Restart Claude Code after installation.
 
 ## MCP Tools
 
@@ -222,7 +208,7 @@ Waggle v2 has 7 components:
 4. **SQLite Database** — 4 tables: `workers`, `callers`, `requests`, `pending_relays`. WAL mode enabled for concurrent reads during hook writes.
 5. **tmux Manager** (`tmux.py`) — Session creation, pane capture, and agent launch via libtmux. Sets `WAGGLE_WORKER_ID` in the tmux environment so hooks can identify the worker.
 6. **State Parser** (`state_parser.py`) — Classifies raw pane content into agent states (working / waiting / ask_user / check_permission / done / unknown).
-7. **CLI** (`cli.py`) — `waggle serve` starts the daemon. `waggle set-state` and `waggle set-state --delete` are used by Claude hooks.
+7. **CLI** (`cli.py`) — `waggle serve` starts the daemon. Hook commands: `waggle set-state [state]`, `waggle set-state --delete`, `waggle permission-request`, `waggle ask-relay`.
 
 ## Configuration
 
