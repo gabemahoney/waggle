@@ -115,6 +115,19 @@ async def approve_permission(worker_id: str, decision: str, ctx: Context = None)
 
 
 @mcp.tool()
+async def answer_question(worker_id: str, answer: str, ctx: Context = None) -> dict:
+    """Answer a worker's pending question.
+
+    Args:
+        worker_id: Worker UUID with the pending question.
+        answer: The answer text.
+        ctx: MCP context (auto-injected).
+    """
+    caller_id = _get_caller_id(ctx)
+    return await engine.answer_question(caller_id, worker_id, answer)
+
+
+@mcp.tool()
 async def terminate_worker(worker_id: str, force: bool = False, ctx: Context = None) -> dict:
     """Terminate a worker and clean up its resources.
 

@@ -99,6 +99,86 @@ def _handle_permission_request(args):
         sys.exit(0)
 
 
+def _handle_ask_relay(args):
+    """Handle AskUserQuestion PreToolUse hook: relay to orchestrator and long-poll for answer."""
+    try:
+        hook_data = json.loads(sys.stdin.read())
+
+        result = subprocess.run(
+            ["tmux", "show-environment", "WAGGLE_WORKER_ID"],
+            capture_output=True, text=True
+        )
+        output = result.stdout.strip()
+        if not output or output.startswith("-") or "=" not in output:
+            sys.exit(0)
+        worker_id = output.split("=", 1)[1]
+        if not worker_id:
+            sys.exit(0)
+
+        from waggle import config, database
+
+        db_path = config.get_db_path()
+        cfg = config.get_config()
+        relay_timeout_seconds = int(cfg.get("relay_timeout_seconds", 3600))
+
+        tool_input = hook_data.get("tool_input", {})
+        question = tool_input.get("question", "")
+
+        relay_id = str(uuid.uuid4())
+        details = json.dumps(tool_input)
+
+        with database.connection(db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO pending_relays (relay_id, worker_id, relay_type, details, status)
+                VALUES (?, ?, 'ask', ?, 'pending')
+                """,
+                (relay_id, worker_id, details),
+            )
+            conn.execute(
+                "UPDATE workers SET status = 'ask_user' WHERE worker_id = ?",
+                (worker_id,),
+            )
+
+        start = time.monotonic()
+        while True:
+            time.sleep(0.5)
+            with database.connection(db_path) as conn:
+                row = conn.execute(
+                    "SELECT status, response FROM pending_relays WHERE relay_id = ?",
+                    (relay_id,),
+                ).fetchone()
+
+            if row and row["status"] == "resolved":
+                answer = row["response"] or ""
+                print(json.dumps({
+                    "hookSpecificOutput": {
+                        "hookEventName": "PreToolUse",
+                        "permissionDecision": "allow",
+                        "updatedInput": {
+                            "answers": {question: answer}
+                        },
+                    }
+                }))
+                sys.exit(0)
+
+            if time.monotonic() - start > relay_timeout_seconds:
+                with database.connection(db_path) as conn:
+                    conn.execute(
+                        "UPDATE pending_relays SET status = 'timeout' WHERE relay_id = ?",
+                        (relay_id,),
+                    )
+                print(json.dumps({
+                    "hookSpecificOutput": {
+                        "hookEventName": "PreToolUse",
+                        "permissionDecision": "deny",
+                    }
+                }))
+                sys.exit(0)
+    except Exception:
+        sys.exit(0)
+
+
 def _handle_set_state(args):
     """Update worker state from tmux pane content, or delete the worker row."""
     try:
@@ -184,6 +264,12 @@ def main():
         help="Handle a PermissionRequest hook (reads JSON from stdin)",
     )
 
+    # waggle ask-relay
+    subparsers.add_parser(
+        "ask-relay",
+        help="Handle an AskUserQuestion PreToolUse hook (reads JSON from stdin)",
+    )
+
     # waggle sting
     subparsers.add_parser(
         "sting",
@@ -202,6 +288,8 @@ def main():
         waggle.daemon.run()
     elif args.subcommand == "permission-request":
         _handle_permission_request(args)
+    elif args.subcommand == "ask-relay":
+        _handle_ask_relay(args)
     elif args.subcommand == "set-state":
         _handle_set_state(args)
     elif args.subcommand == "sting":
