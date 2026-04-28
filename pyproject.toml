@@ -9,6 +9,7 @@ packages = [{include = "waggle", from = "src"}]
 [tool.poetry.dependencies]
 python = "^3.10"
 fastmcp = "^2.14.5"
+httpx = ">=0.27"
 libtmux = "^0.53"
 persist-queue = ">=0.8"
 starlette = ">=0.36"
@@ -17,7 +18,6 @@ uvicorn = ">=0.27"
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.2"
 pytest-asyncio = "^1.3.0"
-httpx = ">=0.27"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

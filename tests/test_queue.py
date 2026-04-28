@@ -391,7 +391,7 @@ class TestOutboundProcessorStub:
         from waggle import outbound_processor
         with patch("asyncio.sleep", new=AsyncMock(side_effect=_StopLoop)):
             try:
-                await outbound_processor.process_outbound(q)
+                await outbound_processor.process_outbound(q, cma_client=None, db_path="/tmp/test.db")
             except _StopLoop:
                 pass
 

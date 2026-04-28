@@ -127,6 +127,7 @@ class TestTLSDaemonIntegration:
             "mcp_worker_port": 8423,
             "tls_cert_path": "",
             "tls_key_path": "",
+            "state_poll_interval_seconds": 2,
         }
         base_cfg.update(extra_cfg)
 
@@ -141,7 +142,8 @@ class TestTLSDaemonIntegration:
              patch("waggle.daemon.uvicorn.Config", side_effect=mock_config_cls), \
              patch("waggle.daemon.uvicorn.Server", return_value=mock_server), \
              patch("waggle.daemon.process_inbound", new=AsyncMock(return_value=None)), \
-             patch("waggle.daemon.process_outbound", new=AsyncMock(return_value=None)):
+             patch("waggle.daemon.process_outbound", new=AsyncMock(return_value=None)), \
+             patch("waggle.daemon.monitor_state", new=AsyncMock(return_value=None)):
             from waggle.daemon import _run
             await _run()
 
