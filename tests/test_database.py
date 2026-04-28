@@ -57,7 +57,7 @@ class TestSchemaCreation:
         cursor.execute("PRAGMA table_info(callers)")
         columns = {row[1] for row in cursor.fetchall()}
         conn.close()
-        assert columns == {"caller_id", "caller_type", "cma_session_id", "registered_at"}
+        assert columns == {"caller_id", "caller_type", "cma_session_id", "unreachable", "registered_at"}
 
     def test_requests_columns(self, initialized_db):
         conn = sqlite3.connect(initialized_db)

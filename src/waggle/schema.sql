@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS callers (
     caller_id      TEXT PRIMARY KEY,
     caller_type    TEXT NOT NULL CHECK(caller_type IN ('cma', 'local')),
     cma_session_id TEXT,
+    unreachable    INTEGER DEFAULT 0,
     registered_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

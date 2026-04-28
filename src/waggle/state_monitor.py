@@ -92,19 +92,11 @@ def _get_pending_relay(db_path: str, worker_id: str) -> dict | None:
 
 def _get_cma_callers(db_path: str, caller_id: str) -> list[dict]:
     with database.connection(db_path) as conn:
-        try:
-            rows = conn.execute(
-                "SELECT caller_id, cma_session_id FROM callers "
-                "WHERE caller_id = ? AND caller_type = 'cma' AND (unreachable IS NULL OR unreachable = 0)",
-                (caller_id,),
-            ).fetchall()
-        except Exception:
-            # unreachable column not yet present (added in Task 2)
-            rows = conn.execute(
-                "SELECT caller_id, cma_session_id FROM callers "
-                "WHERE caller_id = ? AND caller_type = 'cma'",
-                (caller_id,),
-            ).fetchall()
+        rows = conn.execute(
+            "SELECT caller_id, cma_session_id FROM callers "
+            "WHERE caller_id = ? AND caller_type = 'cma' AND (unreachable IS NULL OR unreachable = 0)",
+            (caller_id,),
+        ).fetchall()
     return [dict(r) for r in rows]
 
 
