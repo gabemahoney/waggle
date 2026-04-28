@@ -130,18 +130,18 @@ class TestTLSDaemonIntegration:
         }
         base_cfg.update(extra_cfg)
 
-        with patch("waggle.config.get_config", return_value=base_cfg), \
-             patch("waggle.config.get_db_path", return_value=str(tmp_path / "state.db")), \
-             patch("waggle.config.get_http_port", return_value=8422), \
-             patch("waggle.config.get_mcp_worker_port", return_value=8423), \
-             patch("waggle.database.init_schema"), \
+        with patch("waggle.daemon.get_config", return_value=base_cfg), \
+             patch("waggle.daemon.get_db_path", return_value=str(tmp_path / "state.db")), \
+             patch("waggle.daemon.get_http_port", return_value=8422), \
+             patch("waggle.daemon.get_mcp_worker_port", return_value=8423), \
+             patch("waggle.daemon.init_schema"), \
              patch("waggle.rest.set_inbound_queue"), \
-             patch("waggle.queue.get_inbound_queue", return_value=MagicMock()), \
-             patch("waggle.queue.get_outbound_queue", return_value=MagicMock()), \
+             patch("waggle.daemon.get_inbound_queue", return_value=MagicMock()), \
+             patch("waggle.daemon.get_outbound_queue", return_value=MagicMock()), \
              patch("waggle.daemon.uvicorn.Config", side_effect=mock_config_cls), \
              patch("waggle.daemon.uvicorn.Server", return_value=mock_server), \
-             patch("waggle.inbound_processor.process_inbound", new=AsyncMock(return_value=None)), \
-             patch("waggle.outbound_processor.process_outbound", new=AsyncMock(return_value=None)):
+             patch("waggle.daemon.process_inbound", new=AsyncMock(return_value=None)), \
+             patch("waggle.daemon.process_outbound", new=AsyncMock(return_value=None)):
             from waggle.daemon import _run
             await _run()
 
