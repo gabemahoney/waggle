@@ -3,8 +3,10 @@
 set -uo pipefail
 
 EXIT_CODE=0
+WAGGLE_PID=0
 
 finish() {
+  kill $WAGGLE_PID 2>/dev/null || true
   echo "$EXIT_CODE" > /tmp/waggle_phase_exit
   exit "$EXIT_CODE"
 }
@@ -19,24 +21,47 @@ CLAUDEJSON
 cat > "${HOME}/.claude/settings.json" <<'SETTINGS'
 {
   "hooks": {
-    "SessionStart": [{"hooks": [{"type": "command", "command": "~/.waggle/hooks/waggle_set_state.sh waiting"}]}],
-    "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "~/.waggle/hooks/waggle_set_state.sh working"}]}],
+    "PermissionRequest": [{"matcher": "*", "hooks": [{"type": "command", "command": "waggle permission-request"}]}],
+    "SessionStart": [{"hooks": [{"type": "command", "command": "waggle set-state waiting"}]}],
+    "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "waggle set-state working"}]}],
     "PreToolUse": [
-      {"matcher": "AskUserQuestion", "hooks": [{"type": "command", "command": "~/.waggle/hooks/waggle_set_state.sh waiting"}]},
-      {"matcher": "^(?!AskUserQuestion$).*", "hooks": [{"type": "command", "command": "~/.waggle/hooks/waggle_set_state.sh working"}]}
+      {"matcher": "AskUserQuestion", "hooks": [{"type": "command", "command": "waggle ask-relay"}]},
+      {"matcher": "^(?!AskUserQuestion$).*", "hooks": [{"type": "command", "command": "waggle set-state working"}]}
     ],
-    "PostToolUse": [{"hooks": [{"type": "command", "command": "~/.waggle/hooks/waggle_set_state.sh working"}]}],
-    "PermissionRequest": [{"matcher": "*", "hooks": [{"type": "command", "command": "~/.waggle/hooks/waggle_set_state.sh waiting"}]}],
-    "Stop": [{"hooks": [{"type": "command", "command": "~/.waggle/hooks/waggle_set_state.sh waiting"}]}],
-    "Notification": [{"matcher": "*", "hooks": [{"type": "command", "command": "~/.waggle/hooks/waggle_set_state.sh waiting"}]}],
-    "SessionEnd": [{"hooks": [{"type": "command", "command": "~/.waggle/hooks/waggle_set_state.sh --delete"}]}]
+    "PostToolUse": [{"hooks": [{"type": "command", "command": "waggle set-state working"}]}],
+    "Stop": [{"hooks": [{"type": "command", "command": "waggle set-state waiting"}]}],
+    "SessionEnd": [{"hooks": [{"type": "command", "command": "waggle set-state --delete"}]}]
   }
 }
 SETTINGS
 
-# Install waggle (runs poetry install + registers waggle MCP)
-echo "--- Running install.sh ---"
-/opt/waggle/install.sh
+# Install waggle deps and start daemon
+echo "--- Installing waggle dependencies ---"
+cd /opt/waggle
+poetry install --no-interaction
+
+echo "--- Starting waggle daemon ---"
+export WAGGLE_CMA_API_KEY="dummy-ci-key"
+PYTHONPATH=src poetry run waggle serve &
+WAGGLE_PID=$!
+
+echo "--- Waiting for daemon health check ---"
+for i in $(seq 1 20); do
+  if curl -sf http://localhost:8422/mcp >/dev/null 2>&1; then
+    echo "Daemon is ready."
+    break
+  fi
+  if [[ $i -eq 20 ]]; then
+    echo "FAIL: daemon did not respond within 10s" >&2
+    EXIT_CODE=1
+    finish
+  fi
+  sleep 0.5
+done
+
+# Register waggle MCP via HTTP transport
+echo "--- Registering waggle MCP ---"
+claude mcp add --transport http waggle http://localhost:8422/mcp
 
 # Set up testplans hive from read-only mount
 echo "--- Setting up testplans hive ---"
