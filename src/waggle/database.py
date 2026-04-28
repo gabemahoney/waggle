@@ -67,3 +67,42 @@ def connection(db_path: str) -> Iterator[sqlite3.Connection]:
     finally:
         if conn:
             conn.close()
+
+
+def create_request(
+    db_path: str,
+    request_id: str,
+    caller_id: str,
+    operation: str,
+    params: str | None = None,
+) -> None:
+    with connection(db_path) as conn:
+        conn.execute(
+            "INSERT INTO requests (request_id, caller_id, operation, status, result) VALUES (?, ?, ?, 'pending', ?)",
+            (request_id, caller_id, operation, params or ""),
+        )
+
+
+def get_request(db_path: str, request_id: str) -> dict | None:
+    with connection(db_path) as conn:
+        row = conn.execute(
+            "SELECT request_id, status, result FROM requests WHERE request_id = ?",
+            (request_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def complete_request(db_path: str, request_id: str, result: str) -> None:
+    with connection(db_path) as conn:
+        conn.execute(
+            "UPDATE requests SET status = 'completed', result = ?, completed_at = CURRENT_TIMESTAMP WHERE request_id = ?",
+            (result, request_id),
+        )
+
+
+def fail_request(db_path: str, request_id: str, error: str) -> None:
+    with connection(db_path) as conn:
+        conn.execute(
+            "UPDATE requests SET status = 'failed', result = ?, completed_at = CURRENT_TIMESTAMP WHERE request_id = ?",
+            (error, request_id),
+        )

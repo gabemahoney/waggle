@@ -5,6 +5,8 @@ from starlette.applications import Starlette
 from starlette.routing import Mount
 
 from waggle import engine
+from waggle.middleware import SSHAuthMiddleware
+from waggle.rest import rest_router
 
 mcp = FastMCP("waggle")
 
@@ -141,12 +143,14 @@ async def terminate_worker(worker_id: str, force: bool = False, ctx: Context = N
 
 
 def create_app() -> Starlette:
-    """Build the Starlette application with FastMCP mounted at /mcp."""
+    """Build the Starlette application with FastMCP mounted at /mcp and REST at /api/v1."""
     starlette_app = Starlette(
         routes=[
             Mount("/mcp", app=mcp.http_app()),
+            Mount("/api/v1", app=rest_router),
         ],
     )
+    starlette_app.add_middleware(SSHAuthMiddleware)
     return starlette_app
 
 
