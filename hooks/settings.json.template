@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "SessionStart": [{"hooks": [{"type": "command", "command": "waggle set-state waiting"}]}],
+    "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "waggle set-state working"}]}],
+    "PreToolUse": [
+      {"matcher": "AskUserQuestion", "hooks": [{"type": "command", "command": "waggle ask-relay"}]},
+      {"matcher": "^(?!AskUserQuestion$).*", "hooks": [{"type": "command", "command": "waggle set-state working"}]}
+    ],
+    "PostToolUse": [{"hooks": [{"type": "command", "command": "waggle set-state working"}]}],
+    "PermissionRequest": [{"matcher": "*", "hooks": [{"type": "command", "command": "waggle permission-request"}]}],
+    "Stop": [{"hooks": [{"type": "command", "command": "waggle set-state waiting"}]}],
+    "Notification": [{"matcher": "*", "hooks": [{"type": "command", "command": "waggle set-state waiting"}]}],
+    "SessionEnd": [{"hooks": [{"type": "command", "command": "waggle set-state --delete"}]}]
+  }
+}
