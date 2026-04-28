@@ -1,38 +1,31 @@
 ---
 id: b.tp5
 type: bee
-title: "Test: close_session"
+title: "Test: get_output"
 parent: null
 children: []
-up_dependencies: []
+up_dependencies: [b.tp2]
 egg: null
-created_at: '2026-03-12T22:00:00.000000'
+created_at: '2026-04-28T00:00:00.000000'
 status: pupa
 schema_version: '0.1'
 ---
 
 ## Setup
-Run: `mkdir -p /tmp/waggle-test-close`
-Call `spawn_agent(repo="/tmp/waggle-test-close", session_name="waggle-test-close", agent="claude")`. Save the returned `session_id`.
+A worker must be running (b.tp2 dependency ensures one was spawned).
 
 ## Steps
-1. Call `close_session(session_id=<saved_session_id>, force=true)`
-2. Call `list_agents` with no parameters
+1. Call `list_workers` to get a `worker_id`
+2. Call `get_output` with that `worker_id`
 
-## Expected Response (close_session)
-- `status` equals `"success"`
-- `message` is a string
-
-## Expected Response (list_agents verification)
-- The `agents` array does NOT contain any entry with `session_id == <saved_session_id>`
+## Expected Response
+Response contains `worker_id` (string), `output` (string — the pane content, may be empty if worker just started)
 
 ## Pass Criteria
-- close_session returns `status == "success"` AND session no longer appears in list_agents
+Response contains `worker_id` AND `output` field is present (string, may be empty)
 
 ## Fail Criteria
-- Any exception
-- `status` is not `"success"`
-- Session still present in list_agents after close
+Any exception raised, `worker_id` missing, or `output` field missing
 
 ## Teardown
-None (session already closed in test steps)
+None

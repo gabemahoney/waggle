@@ -1,41 +1,30 @@
 ---
 id: b.tp2
 type: bee
-title: "Test: spawn_agent"
+title: "Test: spawn_worker"
 parent: null
 children: []
-up_dependencies: []
+up_dependencies: [b.tp1]
 egg: null
-created_at: '2026-03-12T22:00:00.000000'
+created_at: '2026-04-28T00:00:00.000000'
 status: pupa
 schema_version: '0.1'
 ---
 
 ## Setup
-Run: `mkdir -p /tmp/waggle-test-spawn`
+Ensure register_caller has been called (b.tp1 dependency handles this).
 
 ## Steps
-1. Call `spawn_agent(repo="/tmp/waggle-test-spawn", session_name="waggle-test-spawn", agent="claude")`
-2. Save the returned `session_id`
-3. Call `list_agents` with no parameters
+1. Call `spawn_worker` with `model="sonnet"`, `repo="/tmp/waggle-test-spawn"`, `session_name="ci-test-spawn"`
 
-## Expected Response (spawn_agent)
-- `status` equals `"success"`
-- `session_id` is a non-empty string (tmux format, e.g. `"$3"`)
-- `session_name` equals `"waggle-test-spawn"`
-- `message` is a string
-
-## Expected Response (list_agents verification)
-- The `agents` array contains an entry where `session_name == "waggle-test-spawn"` or `name == "waggle-test-spawn"`
+## Expected Response
+Response contains `status` field equal to `"ok"` and a `worker_id` field (string UUID)
 
 ## Pass Criteria
-- spawn_agent returns `status == "success"` AND `session_id` is non-empty AND session appears in list_agents
+`status == "ok"` AND `worker_id` is a non-empty string
 
 ## Fail Criteria
-- Any exception
-- `status` is not `"success"`
-- `session_id` is missing or empty
-- Session not found in list_agents
+Any exception raised, `status` is not `"ok"`, or `worker_id` is missing
 
 ## Teardown
-Call `close_session(session_id=<saved_session_id>, force=true)`
+None (worker stays alive for downstream tests; tp9 handles termination)

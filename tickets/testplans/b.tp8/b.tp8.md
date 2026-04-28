@@ -1,0 +1,31 @@
+---
+id: b.tp8
+type: bee
+title: "Test: answer_question"
+parent: null
+children: []
+up_dependencies: [b.tp2]
+egg: null
+created_at: '2026-04-28T00:00:00.000000'
+status: pupa
+schema_version: '0.1'
+---
+
+## Setup
+A worker must be running (b.tp2 dependency ensures one was spawned).
+
+## Steps
+1. Call `list_workers` to get a `worker_id`
+2. Call `answer_question` with that `worker_id` and `answer="CI test answer"`
+
+## Expected Response
+Response contains `status` field. If no question is pending, response may contain `status: "no_pending_question"` which is acceptable.
+
+## Pass Criteria
+Response contains `status` field equal to `"ok"` OR `"no_pending_question"`
+
+## Fail Criteria
+Any exception raised or `status` is not one of the acceptable values
+
+## Teardown
+None

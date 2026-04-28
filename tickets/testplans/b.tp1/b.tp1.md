@@ -1,34 +1,30 @@
 ---
 id: b.tp1
 type: bee
-title: "Test: list_agents"
+title: "Test: register_caller"
 parent: null
 children: []
 up_dependencies: []
 egg: null
-created_at: '2026-03-12T22:00:00.000000'
+created_at: '2026-04-28T00:00:00.000000'
 status: pupa
 schema_version: '0.1'
 ---
 
 ## Setup
-No setup required. The test is valid even if no waggle-managed sessions are active.
+No setup required.
 
 ## Steps
-1. Call `list_agents` with no parameters
+1. Call `register_caller` with `caller_type="local"`
 
 ## Expected Response
-- `status` equals `"success"`
-- `agents` is a JSON array (may be empty)
-- Each agent object (if any) contains: `name` (string), `session_id` (string), `status` (string), `repo` (string), `directory` (string)
+Response contains `status` field equal to `"ok"` and a `caller_id` field (string)
 
 ## Pass Criteria
-- `status == "success"` AND `agents` is a list (including empty list)
+`status == "ok"` AND `caller_id` is a non-empty string
 
 ## Fail Criteria
-- Any exception raised
-- `status` is not `"success"`
-- `agents` field is missing or not a list
+Any exception raised, `status` is not `"ok"`, or `caller_id` is missing/empty
 
 ## Teardown
 None
