@@ -21,29 +21,45 @@ while true; do
 
     content=$(tmux capture-pane -t "$PANE" -p 2>/dev/null || true)
 
-    # Approve any "Do you want to" prompt with numbered options
-    if echo "$content" | grep -q "Do you want to" && echo "$content" | grep -qE "^\s*[12][.)]\s"; then
-        tmux send-keys -t "$PANE" "1"
-        sleep 0.2
-        tmux send-keys -t "$PANE" "Enter"
-        echo "[$SESSION] $(date +%H:%M:%S) APPROVED: permission prompt"
+    # Bypass Permissions safety prompt: select "2. Yes, I accept"
+    if echo "$content" | grep -q "Bypass Permissions mode"; then
+        tmux send-keys -t "$PANE" "2" Enter
+        echo "[$SESSION] $(date +%H:%M:%S) APPROVED: bypass-permissions prompt"
+        sleep 1
+        continue
     fi
 
-    # Approve edit prompts
-    if echo "$content" | grep -q "Do you want to make"; then
-        tmux send-keys -t "$PANE" "1"
-        sleep 0.2
-        tmux send-keys -t "$PANE" "Enter"
-        echo "[$SESSION] $(date +%H:%M:%S) APPROVED: edit prompt"
+    # API key detection prompt: select "1. Yes" to accept the key
+    if echo "$content" | grep -q "Do you want to use this API key"; then
+        tmux send-keys -t "$PANE" "1" Enter
+        echo "[$SESSION] $(date +%H:%M:%S) APPROVED: api-key prompt"
+        sleep 1
+        continue
     fi
 
-    # Approve create prompts
-    if echo "$content" | grep -q "Do you want to create"; then
-        tmux send-keys -t "$PANE" "1"
-        sleep 0.2
-        tmux send-keys -t "$PANE" "Enter"
-        echo "[$SESSION] $(date +%H:%M:%S) APPROVED: create prompt"
+    # Standard permission prompts: select "2" for session-wide approve
+    if echo "$content" | grep -qE "Do you want to (proceed|make|create)\b"; then
+        tmux send-keys -t "$PANE" "2" Enter
+        echo "[$SESSION] $(date +%H:%M:%S) APPROVED (session-wide): permission prompt"
+        sleep 1
+        continue
     fi
 
-    sleep 3
+    # Generic "Do you want to" catch-all: approve with "1"
+    if echo "$content" | grep -q "Do you want to"; then
+        tmux send-keys -t "$PANE" "1" Enter
+        echo "[$SESSION] $(date +%H:%M:%S) APPROVED: generic prompt"
+        sleep 1
+        continue
+    fi
+
+    # "Enter to confirm" without a preceding recognized prompt
+    if echo "$content" | grep -q "Enter to confirm"; then
+        tmux send-keys -t "$PANE" Enter
+        echo "[$SESSION] $(date +%H:%M:%S) APPROVED: enter-to-confirm"
+        sleep 1
+        continue
+    fi
+
+    sleep 1
 done

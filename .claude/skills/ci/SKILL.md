@@ -21,10 +21,16 @@ And stop.
 ### Step 2 — Pre-flight: Retrieve Claude API key
 
 ```bash
-# Check env var first (works on Linux and macOS)
-CLAUDE_API_KEY="${ANTHROPIC_API_KEY:-}"
+# 1. Check credentials file (doesn't pollute env — safe for Claude agent spawns)
+CREDS_FILE="$HOME/.config/anthropic/credentials.env"
+if [[ -f "$CREDS_FILE" ]]; then
+  CLAUDE_API_KEY=$(grep -m1 '^ANTHROPIC_API_KEY=' "$CREDS_FILE" | cut -d= -f2- | tr -d '"' | tr -d "'")
+fi
 
-# If not in env, try macOS Keychain
+# 2. Fall back to env var
+CLAUDE_API_KEY="${CLAUDE_API_KEY:-${ANTHROPIC_API_KEY:-}}"
+
+# 3. Fall back to macOS Keychain
 if [[ -z "$CLAUDE_API_KEY" ]]; then
   CLAUDE_API_KEY=$(security find-generic-password -s "Claude Code" -w 2>/dev/null || true)
   if [[ -z "$CLAUDE_API_KEY" ]]; then
@@ -40,7 +46,7 @@ print(d.get('claudeAiOauth', {}).get('accessToken', ''))
 fi
 
 if [[ -z "$CLAUDE_API_KEY" ]]; then
-  echo "No Claude API key found. Set ANTHROPIC_API_KEY or run 'claude /login' on macOS."
+  echo "No Claude API key found. Save to ~/.config/anthropic/credentials.env or run 'claude /login' on macOS."
   exit 1
 fi
 ```

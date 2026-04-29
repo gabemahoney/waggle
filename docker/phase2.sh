@@ -13,11 +13,19 @@ finish() {
 
 echo "=== WAGGLE CI PHASE 2 ==="
 
-# Bypass Claude onboarding and set up ~/.claude/
+# Bypass Claude onboarding, write API key to .claude.json
 mkdir -p "${HOME}/.claude"
-cat > "${HOME}/.claude.json" <<'CLAUDEJSON'
-{"numStartups":100,"hasCompletedOnboarding":true,"mcpServers":{},"projects":{"/opt/waggle":{"hasTrustDialogAccepted":true}}}
-CLAUDEJSON
+python3 -c "
+import json, os
+d = {'numStartups': 100, 'hasCompletedOnboarding': True, 'mcpServers': {}, 'projects': {'/opt/waggle': {'hasTrustDialogAccepted': True}}}
+key = os.environ.get('ANTHROPIC_API_KEY', '')
+if key:
+    d['apiKey'] = key
+open(os.path.expanduser('~/.claude.json'), 'w').write(json.dumps(d, indent=2))
+print('API key written to .claude.json' if key else 'WARNING: No API key found')
+"
+# Keep ANTHROPIC_API_KEY in env — Claude needs it for interactive auth.
+# --permission-mode bypassPermissions on the claude launch skips the detection prompt.
 cat > "${HOME}/.claude/settings.json" <<'SETTINGS'
 {
   "hooks": {
@@ -39,6 +47,11 @@ SETTINGS
 echo "--- Installing waggle dependencies ---"
 cd /opt/waggle
 poetry install --no-interaction
+
+# Put venv bin on PATH so hooks can find the waggle CLI
+VENV_BIN="$(poetry env info -p)/bin"
+export PATH="$VENV_BIN:$PATH"
+echo "Venv bin added to PATH: $VENV_BIN"
 
 echo "--- Starting waggle daemon ---"
 export WAGGLE_CMA_API_KEY="dummy-ci-key"
@@ -104,7 +117,7 @@ echo "--- Starting auto_approve.sh ---"
 
 # Launch release-test skill — capture exit code for entrypoint.sh
 echo "--- Launching release-test ---"
-claude "/release-test" || EXIT_CODE=$?
+claude --permission-mode bypassPermissions "/release-test" || EXIT_CODE=$?
 
 if [[ $EXIT_CODE -eq 0 ]]; then
   echo "WAGGLE CI PHASE 2 PASSED"

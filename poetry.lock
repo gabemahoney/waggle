@@ -1261,6 +1261,22 @@ readme = ["path (>=13,<18)", "readmemaker (>=1.2.0)"]
 test = ["Faker (>=1.0.8)", "allpairspy (>=2)", "click (>=6.2)", "pytest (>=6.0.1)", "pytest-md-report (>=0.6.2)"]
 
 [[package]]
+name = "persist-queue"
+version = "1.1.0"
+description = "A thread-safe disk based persistent queue in Python."
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "persist_queue-1.1.0-py3-none-any.whl", hash = "sha256:be431ad90cd57621be5563dcd2424e21d81db3bb8cdfb918ade722369d640763"},
+    {file = "persist_queue-1.1.0.tar.gz", hash = "sha256:4c042a3d39c9af4fa24497da76697fb4fff7abe6af04bcf55f099e0c23bc2c67"},
+]
+
+[package.extras]
+async = ["aiofiles (>=0.8.0)", "aiosqlite (>=0.17.0)"]
+extra = ["DBUtils (<3.0.0)", "PyMySQL", "cbor2 (>=5.2.0)", "msgpack (>=0.5.6)"]
+
+[[package]]
 name = "platformdirs"
 version = "4.9.2"
 description = "A small Python package for determining appropriate platform-specific dirs, e.g. a `user data dir`."
@@ -2459,4 +2475,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.10"
-content-hash = "b45790c7f78661166ea8ee9eecc8b5a42c03e8da98403813be66f1d5a6f06eba"
+content-hash = "e5868b7670d67971200cd655e1d11126a6b85eba114a5b66a583e4979a956279"
