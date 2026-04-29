@@ -106,10 +106,12 @@ async def register_worker(ctx: Context = None) -> dict:
 
 def create_worker_app() -> Starlette:
     """Build the Starlette application with worker FastMCP mounted at /mcp."""
+    worker_mcp_http_app = worker_mcp.http_app(path="/")
     return Starlette(
         routes=[
-            Mount("/mcp", app=worker_mcp.http_app()),
+            Mount("/mcp", app=worker_mcp_http_app),
         ],
+        lifespan=worker_mcp_http_app.lifespan,
     )
 
 

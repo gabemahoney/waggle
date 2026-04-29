@@ -144,11 +144,13 @@ async def terminate_worker(worker_id: str, force: bool = False, ctx: Context = N
 
 def create_app() -> Starlette:
     """Build the Starlette application with FastMCP mounted at /mcp and REST at /api/v1."""
+    mcp_http_app = mcp.http_app(path="/")
     starlette_app = Starlette(
         routes=[
-            Mount("/mcp", app=mcp.http_app()),
+            Mount("/mcp", app=mcp_http_app),
             Mount("/api/v1", app=rest_router),
         ],
+        lifespan=mcp_http_app.lifespan,
     )
     starlette_app.add_middleware(SSHAuthMiddleware)
     return starlette_app
