@@ -23,31 +23,37 @@ while true; do
 
     # Bypass Permissions safety prompt: select "2. Yes, I accept"
     if echo "$content" | grep -q "Bypass Permissions mode"; then
-        tmux send-keys -t "$PANE" "2" Enter
+        tmux send-keys -t "$PANE" Down
+        sleep 0.3
+        tmux send-keys -t "$PANE" Enter
         echo "[$SESSION] $(date +%H:%M:%S) APPROVED: bypass-permissions prompt"
         sleep 1
         continue
     fi
 
-    # API key detection prompt: select "1. Yes" to accept the key
+    # API key detection prompt: select "1. Yes" (cursor defaults to "2. No")
     if echo "$content" | grep -q "Do you want to use this API key"; then
-        tmux send-keys -t "$PANE" "1" Enter
+        tmux send-keys -t "$PANE" Up
+        sleep 0.3
+        tmux send-keys -t "$PANE" Enter
         echo "[$SESSION] $(date +%H:%M:%S) APPROVED: api-key prompt"
         sleep 1
         continue
     fi
 
-    # Standard permission prompts: select "2" for session-wide approve
+    # Standard permission prompts: arrow to session-wide approve
     if echo "$content" | grep -qE "Do you want to (proceed|make|create)\b"; then
-        tmux send-keys -t "$PANE" "2" Enter
+        tmux send-keys -t "$PANE" Down
+        sleep 0.3
+        tmux send-keys -t "$PANE" Enter
         echo "[$SESSION] $(date +%H:%M:%S) APPROVED (session-wide): permission prompt"
         sleep 1
         continue
     fi
 
-    # Generic "Do you want to" catch-all: approve with "1"
+    # Generic "Do you want to" catch-all: accept first option (already highlighted)
     if echo "$content" | grep -q "Do you want to"; then
-        tmux send-keys -t "$PANE" "1" Enter
+        tmux send-keys -t "$PANE" Enter
         echo "[$SESSION] $(date +%H:%M:%S) APPROVED: generic prompt"
         sleep 1
         continue

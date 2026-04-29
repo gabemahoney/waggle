@@ -19,13 +19,13 @@ A worker must be running (b.tp2 dependency ensures one was spawned).
 2. Call `get_output` with that `worker_id`
 
 ## Expected Response
-Response contains `worker_id` (string), `output` (string — the pane content, may be empty if worker just started)
+Response contains `worker_id` (string), `lines` (string — the pane content, may be empty if worker just started)
 
 ## Pass Criteria
-Response contains `worker_id` AND `output` field is present (string, may be empty)
+Response contains `worker_id` AND `lines` field is present (string, may be empty)
 
 ## Fail Criteria
-Any exception raised, `worker_id` missing, or `output` field missing
+Any exception raised, `worker_id` missing, or `lines` field missing
 
 ## Teardown
 None

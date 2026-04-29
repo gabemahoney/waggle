@@ -20,13 +20,13 @@ A worker must be running from previous tests.
 3. Call `list_workers` again to confirm the worker is gone
 
 ## Expected Response
-Step 2 response contains `status` field equal to `"ok"`. Step 3 response `workers` list does not contain the terminated `worker_id`.
+Step 2 response contains `worker_id` and `terminated: true`. Step 3 response `workers` list does not contain the terminated `worker_id`.
 
 ## Pass Criteria
-terminate_worker returns `status == "ok"` AND subsequent list_workers does not include the worker
+terminate_worker returns `terminated == true` AND subsequent list_workers does not include the worker
 
 ## Fail Criteria
-Any exception raised, `status` is not `"ok"`, or worker still appears in list_workers after termination
+Any exception raised, response contains an `error` field, or worker still appears in list_workers after termination
 
 ## Teardown
 None (worker is already terminated)

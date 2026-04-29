@@ -18,13 +18,13 @@ Ensure register_caller has been called (b.tp1 dependency handles this).
 1. Call `spawn_worker` with `model="sonnet"`, `repo="/tmp/waggle-test-spawn"`, `session_name="ci-test-spawn"`
 
 ## Expected Response
-Response contains `status` field equal to `"ok"` and a `worker_id` field (string UUID)
+Response contains a `worker_id` field (non-empty string UUID) and a `session_name` field (string)
 
 ## Pass Criteria
-`status == "ok"` AND `worker_id` is a non-empty string
+`worker_id` is a non-empty string AND `session_name` is a non-empty string
 
 ## Fail Criteria
-Any exception raised, `status` is not `"ok"`, or `worker_id` is missing
+Any exception raised, `worker_id` is missing, or response contains an `error` field
 
 ## Teardown
 None (worker stays alive for downstream tests; tp9 handles termination)

@@ -24,10 +24,9 @@ if key:
 open(os.path.expanduser('~/.claude.json'), 'w').write(json.dumps(d, indent=2))
 print('API key written to .claude.json' if key else 'WARNING: No API key found')
 "
-# Keep ANTHROPIC_API_KEY in env — Claude needs it for interactive auth.
-# --permission-mode bypassPermissions on the claude launch skips the detection prompt.
 cat > "${HOME}/.claude/settings.json" <<'SETTINGS'
 {
+  "enableAllProjectMcpServers": true,
   "hooks": {
     "PermissionRequest": [{"matcher": "*", "hooks": [{"type": "command", "command": "waggle permission-request"}]}],
     "SessionStart": [{"hooks": [{"type": "command", "command": "waggle set-state waiting"}]}],
@@ -117,7 +116,11 @@ echo "--- Starting auto_approve.sh ---"
 
 # Launch release-test skill — capture exit code for entrypoint.sh
 echo "--- Launching release-test ---"
-claude --permission-mode bypassPermissions "/release-test" || EXIT_CODE=$?
+claude -p "/release-test" \
+  --allowedTools 'mcp__waggle__*' \
+  --allowedTools 'mcp__bees__*' \
+  --allowedTools 'Bash(mkdir*)' \
+  || EXIT_CODE=$?
 
 if [[ $EXIT_CODE -eq 0 ]]; then
   echo "WAGGLE CI PHASE 2 PASSED"

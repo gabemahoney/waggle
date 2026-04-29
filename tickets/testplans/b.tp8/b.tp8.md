@@ -19,13 +19,13 @@ A worker must be running (b.tp2 dependency ensures one was spawned).
 2. Call `answer_question` with that `worker_id` and `answer="CI test answer"`
 
 ## Expected Response
-Response contains `status` field. If no question is pending, response may contain `status: "no_pending_question"` which is acceptable.
+Response contains `worker_id` and `delivered: true` on success. If no question is pending, response contains `error: "no_pending_question"` which is acceptable.
 
 ## Pass Criteria
-Response contains `status` field equal to `"ok"` OR `"no_pending_question"`
+Response contains (`worker_id` AND `delivered == true`) OR (`error == "no_pending_question"`)
 
 ## Fail Criteria
-Any exception raised or `status` is not one of the acceptable values
+Any unexpected exception raised, or response contains an `error` value other than `"no_pending_question"`
 
 ## Teardown
 None

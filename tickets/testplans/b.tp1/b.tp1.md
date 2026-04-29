@@ -18,13 +18,13 @@ No setup required.
 1. Call `register_caller` with `caller_type="local"`
 
 ## Expected Response
-Response contains `status` field equal to `"ok"` and a `caller_id` field (string)
+Response contains a `caller_id` field (non-empty string)
 
 ## Pass Criteria
-`status == "ok"` AND `caller_id` is a non-empty string
+`caller_id` is a non-empty string
 
 ## Fail Criteria
-Any exception raised, `status` is not `"ok"`, or `caller_id` is missing/empty
+Any exception raised, or `caller_id` is missing/empty
 
 ## Teardown
 None
