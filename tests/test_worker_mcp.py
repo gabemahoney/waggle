@@ -196,8 +196,8 @@ class TestWorkerRegistrationMiddleware:
         assert registry._sessions == sessions_before
 
     @pytest.mark.asyncio
-    async def test_skips_if_already_registered(self, db_path):
-        """Worker already in registry → session not replaced."""
+    async def test_reconnect_replaces_stale_session(self, db_path):
+        """Worker reconnects with a different session → new session replaces old in registry and DB."""
         worker_id = _insert_worker(db_path)
         original_session = MagicMock()
         registry.register(worker_id, original_session)
@@ -208,7 +208,7 @@ class TestWorkerRegistrationMiddleware:
             mock_request.query_params.get.return_value = worker_id
 
             mock_ctx = MagicMock()
-            mock_ctx.fastmcp_context.session = new_session
+            mock_ctx.fastmcp_context.session = new_session  # different object
             mock_ctx.fastmcp_context.session_id = "new-session-id"
 
             mock_call_next = AsyncMock(return_value=[])
@@ -216,8 +216,55 @@ class TestWorkerRegistrationMiddleware:
             with patch("waggle.worker_mcp.get_http_request", return_value=mock_request):
                 await WorkerRegistrationMiddleware().on_list_tools(mock_ctx, mock_call_next)
 
-            # Original session must still be in registry (idempotent)
-            assert registry.get(worker_id) is original_session
+            # New session must replace the stale one
+            assert registry.get(worker_id) is new_session
+            assert registry.get(worker_id) is not original_session
+
+            # DB updated with new session id
+            with connection(db_path) as conn:
+                row = conn.execute(
+                    "SELECT mcp_session_id FROM workers WHERE worker_id = ?", (worker_id,)
+                ).fetchone()
+            assert row["mcp_session_id"] == "new-session-id"
+        finally:
+            registry.unregister(worker_id)
+
+    @pytest.mark.asyncio
+    async def test_same_session_is_noop(self, db_path):
+        """Same session object already in registry → no DB write, registry unchanged."""
+        worker_id = _insert_worker(db_path)
+        same_session = MagicMock()
+        registry.register(worker_id, same_session)
+
+        # Pre-set a known session id so we can detect if it gets overwritten
+        with connection(db_path) as conn:
+            conn.execute(
+                "UPDATE workers SET mcp_session_id = ? WHERE worker_id = ?",
+                ("original-session-id", worker_id),
+            )
+
+        try:
+            mock_request = MagicMock()
+            mock_request.query_params.get.return_value = worker_id
+
+            mock_ctx = MagicMock()
+            mock_ctx.fastmcp_context.session = same_session  # same object
+            mock_ctx.fastmcp_context.session_id = "should-not-be-written"
+
+            mock_call_next = AsyncMock(return_value=[])
+
+            with patch("waggle.worker_mcp.get_http_request", return_value=mock_request):
+                await WorkerRegistrationMiddleware().on_list_tools(mock_ctx, mock_call_next)
+
+            # Registry unchanged
+            assert registry.get(worker_id) is same_session
+
+            # DB not updated
+            with connection(db_path) as conn:
+                row = conn.execute(
+                    "SELECT mcp_session_id FROM workers WHERE worker_id = ?", (worker_id,)
+                ).fetchone()
+            assert row["mcp_session_id"] == "original-session-id"
         finally:
             registry.unregister(worker_id)
 

@@ -47,16 +47,23 @@ class WorkerRegistrationMiddleware(Middleware):
         try:
             request = get_http_request()
             worker_id = request.query_params.get("worker_id")
-            if worker_id and registry.get(worker_id) is None:
+            if worker_id:
                 session = context.fastmcp_context.session
-                registry.register(worker_id, session)
-                db_path = _db_path()
-                mcp_session_id = context.fastmcp_context.session_id
-                with database.connection(db_path) as conn:
-                    conn.execute(
-                        "UPDATE workers SET mcp_session_id = ? WHERE worker_id = ?",
-                        (str(mcp_session_id) if mcp_session_id else None, worker_id),
-                    )
+                existing = registry.get(worker_id)
+                if existing is not session:
+                    if existing is not None:
+                        logger.debug(
+                            "Replacing stale session for worker_id=%s (old=%s, new=%s)",
+                            worker_id, id(existing), id(session),
+                        )
+                    registry.register(worker_id, session)
+                    db_path = _db_path()
+                    mcp_session_id = context.fastmcp_context.session_id
+                    with database.connection(db_path) as conn:
+                        conn.execute(
+                            "UPDATE workers SET mcp_session_id = ? WHERE worker_id = ?",
+                            (str(mcp_session_id) if mcp_session_id else None, worker_id),
+                        )
         except Exception as e:
             logger.warning("Auto-registration failed for worker_id=%s: %s", worker_id, e)
         return result
