@@ -1,14 +1,18 @@
 """Waggle v2 Worker MCP server — workers connect here to register themselves."""
 
+import logging
 from typing import Any
 
 from fastmcp import FastMCP, Context
 from fastmcp.server.dependencies import get_http_request
+from fastmcp.server.middleware import Middleware, MiddlewareContext
 from mcp.server.session import ServerSession
 from starlette.applications import Starlette
 from starlette.routing import Mount
 
 from waggle import config, database
+
+logger = logging.getLogger(__name__)
 
 
 class WorkerRegistry:
@@ -33,8 +37,34 @@ class WorkerRegistry:
 
 registry = WorkerRegistry()
 
+
+class WorkerRegistrationMiddleware(Middleware):
+    """Auto-registers a worker session during tools/list (MCP client init)."""
+
+    async def on_list_tools(self, context: MiddlewareContext, call_next):
+        result = await call_next(context)
+        worker_id = None
+        try:
+            request = get_http_request()
+            worker_id = request.query_params.get("worker_id")
+            if worker_id and registry.get(worker_id) is None:
+                session = context.fastmcp_context.session
+                registry.register(worker_id, session)
+                db_path = _db_path()
+                mcp_session_id = context.fastmcp_context.session_id
+                with database.connection(db_path) as conn:
+                    conn.execute(
+                        "UPDATE workers SET mcp_session_id = ? WHERE worker_id = ?",
+                        (str(mcp_session_id) if mcp_session_id else None, worker_id),
+                    )
+        except Exception as e:
+            logger.warning("Auto-registration failed for worker_id=%s: %s", worker_id, e)
+        return result
+
+
 worker_mcp = FastMCP("waggle-worker")
 worker_mcp._capabilities_config = {"experimental": {"claude/channel": {}}}
+worker_mcp.add_middleware(WorkerRegistrationMiddleware())
 
 
 def _db_path() -> str:

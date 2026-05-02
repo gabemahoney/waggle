@@ -24,7 +24,7 @@ Defined in `src/waggle/engine.py`. Delivery is handled via the worker's register
 
 ## Worker Registration
 
-Workers connect to the waggle worker MCP server (port `8423`) using the `?worker_id={uuid}` query parameter embedded in their per-worker MCP config. On connection, the worker calls the `register_worker` tool, which stores the active `ServerSession` in `WorkerRegistry`. This session reference is what `send_input` uses to push notifications.
+Workers connect to the waggle worker MCP server (port `8423`) using the `?worker_id={uuid}` query parameter embedded in their per-worker MCP config. Registration is automatic: `WorkerRegistrationMiddleware` intercepts the `tools/list` request that fires during MCP client initialization and stores the active `ServerSession` in `WorkerRegistry`. No explicit tool call is required. The `register_worker` tool still exists as a fallback but is no longer the primary registration path.
 
 See `spawn_worker.md` for how the per-worker MCP config is written at spawn time.
 

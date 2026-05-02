@@ -45,7 +45,7 @@ At spawn time, engine writes `~/.waggle/worker-configs/{worker_id}/mcp.json`:
 
 `mcp_worker_port` comes from `config.get_config()["mcp_worker_port"]` (default `8423`).
 
-This config is passed to claude via `--mcp-config`, enabling the worker to connect to the waggle worker MCP server and register itself for Claude Channels notification delivery.
+This config is passed to claude via `--mcp-config`, enabling the worker to connect to the waggle worker MCP server. Registration is automatic: `WorkerRegistrationMiddleware` intercepts the `tools/list` request fired during MCP client initialization and stores the `ServerSession` in `WorkerRegistry`.
 
 ## Claude Launch Flags
 

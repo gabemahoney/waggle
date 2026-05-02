@@ -5,7 +5,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from waggle.database import init_schema, connection
-from waggle.worker_mcp import WorkerRegistry, register_worker
+from waggle.worker_mcp import WorkerRegistry, WorkerRegistrationMiddleware, register_worker, registry
 
 
 # ---------------------------------------------------------------------------
@@ -140,3 +140,94 @@ class TestRegisterWorkerTool:
         """ctx=None → error: no_context."""
         result = await register_worker_fn(ctx=None)
         assert result == {"error": "no_context"}
+
+
+# ---------------------------------------------------------------------------
+# WorkerRegistrationMiddleware
+# ---------------------------------------------------------------------------
+
+
+class TestWorkerRegistrationMiddleware:
+    @pytest.mark.asyncio
+    async def test_auto_registers_on_list_tools(self, db_path):
+        """Valid worker_id in query params → session stored in registry and DB."""
+        worker_id = _insert_worker(db_path)
+
+        mock_session = MagicMock()
+        mock_request = MagicMock()
+        mock_request.query_params.get.return_value = worker_id
+
+        mock_ctx = MagicMock()
+        mock_ctx.fastmcp_context.session = mock_session
+        mock_ctx.fastmcp_context.session_id = "test-session-id"
+
+        mock_call_next = AsyncMock(return_value=[])
+
+        try:
+            with patch("waggle.worker_mcp.get_http_request", return_value=mock_request):
+                result = await WorkerRegistrationMiddleware().on_list_tools(mock_ctx, mock_call_next)
+
+            assert registry.get(worker_id) is mock_session
+            assert result == []
+
+            with connection(db_path) as conn:
+                row = conn.execute(
+                    "SELECT mcp_session_id FROM workers WHERE worker_id = ?", (worker_id,)
+                ).fetchone()
+            assert row["mcp_session_id"] == "test-session-id"
+        finally:
+            registry.unregister(worker_id)
+
+    @pytest.mark.asyncio
+    async def test_skips_if_no_worker_id(self, db_path):
+        """No worker_id in query params → registry unchanged."""
+        mock_request = MagicMock()
+        mock_request.query_params.get.return_value = None
+
+        mock_ctx = MagicMock()
+        mock_call_next = AsyncMock(return_value=[])
+
+        sessions_before = dict(registry._sessions)
+        with patch("waggle.worker_mcp.get_http_request", return_value=mock_request):
+            result = await WorkerRegistrationMiddleware().on_list_tools(mock_ctx, mock_call_next)
+
+        # Result still returned, no new registrations occurred
+        assert result == []
+        assert registry._sessions == sessions_before
+
+    @pytest.mark.asyncio
+    async def test_skips_if_already_registered(self, db_path):
+        """Worker already in registry → session not replaced."""
+        worker_id = _insert_worker(db_path)
+        original_session = MagicMock()
+        registry.register(worker_id, original_session)
+
+        try:
+            new_session = MagicMock()
+            mock_request = MagicMock()
+            mock_request.query_params.get.return_value = worker_id
+
+            mock_ctx = MagicMock()
+            mock_ctx.fastmcp_context.session = new_session
+            mock_ctx.fastmcp_context.session_id = "new-session-id"
+
+            mock_call_next = AsyncMock(return_value=[])
+
+            with patch("waggle.worker_mcp.get_http_request", return_value=mock_request):
+                await WorkerRegistrationMiddleware().on_list_tools(mock_ctx, mock_call_next)
+
+            # Original session must still be in registry (idempotent)
+            assert registry.get(worker_id) is original_session
+        finally:
+            registry.unregister(worker_id)
+
+    @pytest.mark.asyncio
+    async def test_does_not_break_on_error(self, db_path):
+        """get_http_request raising → tools/list result still returned without raising."""
+        mock_ctx = MagicMock()
+        mock_call_next = AsyncMock(return_value=["tool-a", "tool-b"])
+
+        with patch("waggle.worker_mcp.get_http_request", side_effect=RuntimeError("no request")):
+            result = await WorkerRegistrationMiddleware().on_list_tools(mock_ctx, mock_call_next)
+
+        assert result == ["tool-a", "tool-b"]
