@@ -16,7 +16,6 @@ _DEFAULTS: Dict[str, Any] = {
     "state_poll_interval_seconds": 2,
     "output_capture_lines": 50,
     "http_port": 8422,
-    "mcp_worker_port": 8423,
     "relay_timeout_seconds": 3600,
     "authorized_keys_path": "~/.waggle/authorized_keys.json",
     "repos_path": "~/.waggle/repos",
@@ -67,11 +66,6 @@ def get_queue_path() -> str:
 def get_http_port() -> int:
     """Return the HTTP server port."""
     return int(get_config()["http_port"])
-
-
-def get_mcp_worker_port() -> int:
-    """Return the MCP worker port."""
-    return int(get_config()["mcp_worker_port"])
 
 
 def get_max_workers() -> int:

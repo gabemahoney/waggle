@@ -1,8 +1,8 @@
-"""Unit tests for send_input — Claude Channels delivery."""
+"""Unit tests for send_input — tmux send-keys delivery."""
 
 import uuid
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 from waggle import engine
 from waggle.database import init_schema, connection
@@ -25,7 +25,6 @@ def db_path(tmp_path, monkeypatch):
             "database_path": path,
             "max_workers": 3,
             "repos_path": str(tmp_path / "repos"),
-            "mcp_worker_port": 8423,
         },
     )
     return path
@@ -42,14 +41,7 @@ def _insert_worker(db_path, caller_id="test-caller", status="working"):
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (worker_id, caller_id, session_name, session_id, "sonnet", "/repo", status),
         )
-    return worker_id
-
-
-def _make_mock_session():
-    """Mock ServerSession with an awaitable _write_stream.send."""
-    mock_session = MagicMock()
-    mock_session._write_stream.send = AsyncMock()
-    return mock_session
+    return worker_id, session_id
 
 
 # ---------------------------------------------------------------------------
@@ -60,16 +52,15 @@ def _make_mock_session():
 class TestSendInput:
     @pytest.mark.asyncio
     async def test_send_input_success(self, db_path):
-        """Worker in DB + in registry → delivered: True, notification sent."""
-        worker_id = _insert_worker(db_path, caller_id="test-caller")
-        mock_session = _make_mock_session()
+        """Worker in DB → tmux.send_keys called with correct session_id and text → delivered: True."""
+        worker_id, session_id = _insert_worker(db_path, caller_id="test-caller")
 
-        with patch("waggle.worker_mcp.registry") as mock_registry:
-            mock_registry.get.return_value = mock_session
+        with patch("waggle.engine.tmux.send_keys", new_callable=AsyncMock) as mock_send:
+            mock_send.return_value = {"status": "success"}
             result = await engine.send_input("test-caller", worker_id, "hello")
 
         assert result == {"worker_id": worker_id, "delivered": True}
-        mock_session._write_stream.send.assert_awaited_once()
+        mock_send.assert_awaited_once_with(session_id, "hello")
 
     @pytest.mark.asyncio
     async def test_send_input_worker_not_found(self, db_path):
@@ -81,17 +72,17 @@ class TestSendInput:
     @pytest.mark.asyncio
     async def test_send_input_wrong_caller(self, db_path):
         """Worker exists but different caller → error: worker_not_found."""
-        worker_id = _insert_worker(db_path, caller_id="test-caller")
+        worker_id, _ = _insert_worker(db_path, caller_id="test-caller")
         result = await engine.send_input("wrong-caller", worker_id, "hello")
         assert result == {"error": "worker_not_found"}
 
     @pytest.mark.asyncio
-    async def test_send_input_worker_not_connected(self, db_path):
-        """Worker in DB but not in registry → error: worker_not_connected."""
-        worker_id = _insert_worker(db_path, caller_id="test-caller")
+    async def test_send_input_tmux_error(self, db_path):
+        """Worker exists but tmux.send_keys returns error → returns error message."""
+        worker_id, session_id = _insert_worker(db_path, caller_id="test-caller")
 
-        with patch("waggle.worker_mcp.registry") as mock_registry:
-            mock_registry.get.return_value = None
+        with patch("waggle.engine.tmux.send_keys", new_callable=AsyncMock) as mock_send:
+            mock_send.return_value = {"status": "error", "message": "no such session"}
             result = await engine.send_input("test-caller", worker_id, "hello")
 
-        assert result == {"error": "worker_not_connected"}
+        assert result == {"error": "no such session"}

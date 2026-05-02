@@ -198,7 +198,7 @@ Terminate a worker and clean up its tmux session and database row.
 
 ### `send_input`
 
-Send text input to a worker via Claude Channels notification.
+Send text input to a worker via tmux send-keys.
 
 **Parameters:**
 
@@ -207,7 +207,7 @@ Send text input to a worker via Claude Channels notification.
 | `worker_id` | `str` | Yes | Worker UUID |
 | `text` | `str` | Yes | Text content to deliver |
 
-**Returns:** `{"worker_id": str, "delivered": true}` or `{"error": "worker_not_found"}` / `{"error": "worker_not_connected"}`
+**Returns:** `{"worker_id": str, "delivered": true}` or `{"error": "worker_not_found"}`
 
 ### `approve_permission`
 
@@ -259,7 +259,6 @@ Create `~/.waggle/config.json` to override defaults. All keys are optional.
   "queue_path": "~/.waggle/queue.db",
   "max_workers": 8,
   "http_port": 8422,
-  "mcp_worker_port": 8423,
   "repos_path": "~/.waggle/repos",
   "relay_timeout_seconds": 3600,
   "state_poll_interval_seconds": 2,
@@ -279,7 +278,6 @@ Create `~/.waggle/config.json` to override defaults. All keys are optional.
 | `queue_path` | `~/.waggle/queue.db` | Path to the queue database |
 | `max_workers` | `8` | Maximum concurrent workers (global) |
 | `http_port` | `8422` | Port for the HTTP daemon |
-| `mcp_worker_port` | `8423` | Port reserved for MCP worker connections |
 | `repos_path` | `~/.waggle/repos` | Directory where remote repos are cloned |
 | `relay_timeout_seconds` | `3600` | How long pending relays are retained |
 | `state_poll_interval_seconds` | `2` | Polling interval for state updates |

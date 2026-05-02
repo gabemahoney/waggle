@@ -10,7 +10,6 @@ from waggle.config import (
     get_db_path,
     get_http_port,
     get_max_workers,
-    get_mcp_worker_port,
     get_queue_path,
     get_repos_path,
 )
@@ -41,7 +40,7 @@ class TestAllDefaults:
         config = get_config()
         expected_keys = {
             "database_path", "queue_path", "max_workers", "state_poll_interval_seconds",
-            "output_capture_lines", "http_port", "mcp_worker_port", "relay_timeout_seconds",
+            "output_capture_lines", "http_port", "relay_timeout_seconds",
             "authorized_keys_path", "repos_path", "admin_email", "admin_notify_after_retries",
             "max_retry_hours", "tls_cert_path", "tls_key_path",
         }
@@ -64,9 +63,6 @@ class TestAllDefaults:
 
     def test_http_port_default(self, temp_home):
         assert get_config()["http_port"] == 8422
-
-    def test_mcp_worker_port_default(self, temp_home):
-        assert get_config()["mcp_worker_port"] == 8423
 
     def test_relay_timeout_default(self, temp_home):
         assert get_config()["relay_timeout_seconds"] == 3600
@@ -182,7 +178,7 @@ class TestMalformedJSON:
         config = get_config()
         expected_keys = {
             "database_path", "queue_path", "max_workers", "state_poll_interval_seconds",
-            "output_capture_lines", "http_port", "mcp_worker_port", "relay_timeout_seconds",
+            "output_capture_lines", "http_port", "relay_timeout_seconds",
             "authorized_keys_path", "repos_path", "admin_email", "admin_notify_after_retries",
             "max_retry_hours", "tls_cert_path", "tls_key_path",
         }
@@ -228,11 +224,6 @@ class TestPortAndIntAccessors:
         result = get_http_port()
         assert isinstance(result, int)
         assert result == 8422
-
-    def test_get_mcp_worker_port_returns_int(self, temp_home):
-        result = get_mcp_worker_port()
-        assert isinstance(result, int)
-        assert result == 8423
 
     def test_get_max_workers_returns_int(self, temp_home):
         result = get_max_workers()

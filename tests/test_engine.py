@@ -27,7 +27,6 @@ def db_path(tmp_path, monkeypatch):
         "database_path": path,
         "max_workers": 3,
         "repos_path": repos_path,
-        "mcp_worker_port": 8423,
     }
 
     monkeypatch.setattr("waggle.config.get_config", lambda: mock_config)

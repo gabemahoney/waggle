@@ -1,10 +1,7 @@
-"""Restart recovery — rediscover workers, reconnect MCP, drain queues."""
+"""Restart recovery — rediscover workers, drain queues."""
 
-import asyncio
 import logging
 from pathlib import Path
-
-import libtmux
 
 from waggle import database
 from waggle.queue import MessageEnvelope, MessageType, enqueue_outbound
@@ -33,10 +30,9 @@ async def restart_recovery(outbound_queue, db_path: str) -> dict:
         caller_id = row["caller_id"]
 
         if _session_alive(session_id):
-            # Alive: send MCP reconnect, add to monitoring
+            # Alive: add to monitoring
             result["alive"] += 1
-            await _send_mcp_reconnect(session_id)
-            logger.info("Recovery: worker %s alive, MCP reconnect sent", worker_id)
+            logger.info("Recovery: worker %s alive", worker_id)
         else:
             # Dead: mark done, notify CMA, timeout pending relays
             result["dead"] += 1
@@ -69,24 +65,6 @@ async def restart_recovery(outbound_queue, db_path: str) -> dict:
         result["alive"], result["dead"], result["relays_timed_out"],
     )
     return result
-
-
-def _send_mcp_reconnect_sync(session_id: str) -> None:
-    """Send /mcp reconnect waggle-worker to a tmux session."""
-    try:
-        server = libtmux.Server()
-        session = server.sessions.get(session_id=session_id)
-        if session is None:
-            return
-        pane = session.active_window.active_pane
-        pane.send_keys("/mcp reconnect waggle-worker", enter=True)
-    except Exception as e:
-        logger.warning("Failed to send MCP reconnect to %s: %s", session_id, e)
-
-
-async def _send_mcp_reconnect(session_id: str) -> None:
-    """Async wrapper for MCP reconnect."""
-    await asyncio.to_thread(_send_mcp_reconnect_sync, session_id)
 
 
 def _enqueue_dead_notification(outbound_queue, worker_id: str, session_name: str, caller_id: str) -> None:

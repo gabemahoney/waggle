@@ -193,20 +193,12 @@ def _launch_agent_in_pane_sync(
     session_id: str,
     model: str,
     settings: str | None = None,
-    mcp_config_path: str | None = None,
 ) -> dict:
     try:
         server = libtmux.Server()
         session = server.sessions.get(session_id=session_id)
         pane = session.active_window.active_pane
-        if mcp_config_path:
-            cmd = (
-                f"claude --mcp-config {mcp_config_path}"
-                f" --dangerously-load-development-channels server:waggle-worker"
-                f" --model {model.lower()}"
-            )
-        else:
-            cmd = f"claude --model {model.lower()}"
+        cmd = f"claude --model {model.lower()}"
         if settings:
             # Only allow characters valid in CLI flags to prevent shell injection
             if re.search(r'[;&|`$(){}\\<>]', settings):
@@ -224,7 +216,6 @@ async def launch_agent_in_pane(
     session_id: str,
     model: str,
     settings: str | None = None,
-    mcp_config_path: str | None = None,
 ) -> dict:
     """Send a claude launch command to the active pane of a session.
 
@@ -232,13 +223,37 @@ async def launch_agent_in_pane(
         session_id: The tmux session ID (e.g. "$1").
         model: Model name (e.g. "sonnet", "haiku", "opus").
         settings: Optional extra CLI flags (e.g. "--dangerously-skip-permissions").
-        mcp_config_path: Optional path to an MCP config JSON file. When provided,
-            launches with --mcp-config and --dangerously-load-development-channels.
 
     Returns:
         {"status": "success"} or {"status": "error", "message": str}
     """
-    return await asyncio.to_thread(_launch_agent_in_pane_sync, session_id, model, settings, mcp_config_path)
+    return await asyncio.to_thread(_launch_agent_in_pane_sync, session_id, model, settings)
+
+
+def _send_keys_sync(session_id: str, text: str) -> dict:
+    try:
+        server = libtmux.Server()
+        session = server.sessions.get(session_id=session_id)
+        pane = session.active_window.active_pane
+        pane.send_keys(text, enter=True)
+        return {"status": "success"}
+    except LibTmuxException as e:
+        return {"status": "error", "message": str(e)}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+async def send_keys(session_id: str, text: str) -> dict:
+    """Send text to the active pane of a tmux session via send-keys.
+
+    Args:
+        session_id: The tmux session ID (e.g. "$1").
+        text: Text to send; Enter is appended automatically.
+
+    Returns:
+        {"status": "success"} or {"status": "error", "message": str}
+    """
+    return await asyncio.to_thread(_send_keys_sync, session_id, text)
 
 
 def clone_or_update_repo(repo: str, repos_path: str) -> str:

@@ -20,6 +20,8 @@ from waggle.tmux import (
     create_session,
     _launch_agent_in_pane_sync,
     launch_agent_in_pane,
+    _send_keys_sync,
+    send_keys,
     clone_or_update_repo,
 )
 
@@ -606,7 +608,7 @@ class TestLaunchAgentInPaneAsync:
 
         result = await launch_agent_in_pane("$1", "sonnet", "--no-interactive")
 
-        mock_sync.assert_called_once_with("$1", "sonnet", "--no-interactive", None)
+        mock_sync.assert_called_once_with("$1", "sonnet", "--no-interactive")
         assert result == {"status": "success"}
 
     @pytest.mark.asyncio
@@ -617,5 +619,74 @@ class TestLaunchAgentInPaneAsync:
 
         result = await launch_agent_in_pane("$1", "haiku")
 
-        mock_sync.assert_called_once_with("$1", "haiku", None, None)
+        mock_sync.assert_called_once_with("$1", "haiku", None)
         assert result == {"status": "success"}
+
+
+class TestSendKeysSync:
+    """Tests for _send_keys_sync() — sync send-keys via libtmux."""
+
+    @patch("waggle.tmux.libtmux.Server")
+    def test_success(self, mock_server_cls):
+        """Verify pane.send_keys is called with text and enter=True → {"status": "success"}."""
+        mock_server = MagicMock()
+        mock_session = MagicMock()
+        mock_pane = MagicMock()
+        mock_session.active_window.active_pane = mock_pane
+        mock_server.sessions.get.return_value = mock_session
+        mock_server_cls.return_value = mock_server
+
+        result = _send_keys_sync("$1", "hello world")
+
+        mock_server.sessions.get.assert_called_once_with(session_id="$1")
+        mock_pane.send_keys.assert_called_once_with("hello world", enter=True)
+        assert result == {"status": "success"}
+
+    @patch("waggle.tmux.libtmux.Server")
+    def test_session_not_found_returns_error(self, mock_server_cls):
+        """Verify returns error dict when session lookup raises Exception."""
+        mock_server = MagicMock()
+        mock_server.sessions.get.side_effect = Exception("no such session")
+        mock_server_cls.return_value = mock_server
+
+        result = _send_keys_sync("$99", "hello")
+
+        assert result["status"] == "error"
+        assert "no such session" in result["message"]
+
+    @patch("waggle.tmux.libtmux.Server")
+    def test_libtmux_exception_returns_error(self, mock_server_cls):
+        """Verify LibTmuxException is caught and returned as error dict."""
+        mock_server = MagicMock()
+        mock_server.sessions.get.side_effect = LibTmuxException("tmux error")
+        mock_server_cls.return_value = mock_server
+
+        result = _send_keys_sync("$1", "hello")
+
+        assert result["status"] == "error"
+        assert "tmux error" in result["message"]
+
+
+class TestSendKeysAsync:
+    """Tests for send_keys() — async wrapper delegating to _send_keys_sync."""
+
+    @pytest.mark.asyncio
+    @patch("waggle.tmux._send_keys_sync")
+    async def test_async_delegates_to_sync(self, mock_sync):
+        """Verify send_keys delegates to _send_keys_sync and returns its result."""
+        mock_sync.return_value = {"status": "success"}
+
+        result = await send_keys("$1", "hello")
+
+        mock_sync.assert_called_once_with("$1", "hello")
+        assert result == {"status": "success"}
+
+    @pytest.mark.asyncio
+    @patch("waggle.tmux._send_keys_sync")
+    async def test_returns_error_from_sync(self, mock_sync):
+        """Verify send_keys passes through error dict from _send_keys_sync."""
+        mock_sync.return_value = {"status": "error", "message": "no such session"}
+
+        result = await send_keys("$99", "hello")
+
+        assert result == {"status": "error", "message": "no such session"}

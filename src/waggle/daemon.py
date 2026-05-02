@@ -8,7 +8,7 @@ import uvicorn
 
 from waggle import rest
 from waggle.cma_client import CMAClient
-from waggle.config import get_config, get_db_path, get_http_port, get_mcp_worker_port
+from waggle.config import get_config, get_db_path, get_http_port
 from waggle.database import init_schema
 from waggle.inbound_processor import process_inbound
 from waggle.outbound_processor import process_outbound
@@ -18,7 +18,7 @@ from waggle.state_monitor import monitor_state
 
 
 async def _run() -> None:
-    """Start waggle orchestrator and worker MCP servers concurrently."""
+    """Start the waggle daemon."""
     init_schema(get_db_path())
 
     cfg = get_config()
@@ -49,15 +49,7 @@ async def _run() -> None:
         log_level="info",
         **ssl_kwargs,
     )
-    config2 = uvicorn.Config(
-        "waggle.worker_mcp:worker_app",
-        host="127.0.0.1",
-        port=get_mcp_worker_port(),
-        log_level="info",
-    )
-
     server1 = uvicorn.Server(config1)
-    server2 = uvicorn.Server(config2)
 
     await restart_recovery(outbound_q, db_path)
 
@@ -65,7 +57,6 @@ async def _run() -> None:
     try:
         await asyncio.gather(
             server1.serve(),
-            server2.serve(),
             process_inbound(inbound_q),
             process_outbound(outbound_q, cma_client, db_path),
             monitor_state(outbound_q, db_path, cfg["state_poll_interval_seconds"]),

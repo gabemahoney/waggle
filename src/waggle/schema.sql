@@ -9,7 +9,6 @@ CREATE TABLE IF NOT EXISTS workers (
     repo           TEXT NOT NULL,
     status         TEXT NOT NULL DEFAULT 'working',
     output         TEXT DEFAULT '',
-    mcp_session_id TEXT,
     created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

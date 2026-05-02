@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -53,11 +53,9 @@ async def test_alive_worker_gets_mcp_reconnect(db):
     q = _make_mock_queue()
 
     with patch("waggle.recovery._session_alive", return_value=True), \
-         patch("waggle.recovery._send_mcp_reconnect", new_callable=AsyncMock) as mock_reconnect, \
          patch("waggle.recovery._enforce_permissions"):
         result = await restart_recovery(q, db)
 
-    mock_reconnect.assert_called_once_with("sess-alive-1")
     assert result["alive"] == 1
     assert result["dead"] == 0
 
@@ -155,7 +153,6 @@ async def test_alive_worker_pending_relays_unchanged(db):
     q = _make_mock_queue()
 
     with patch("waggle.recovery._session_alive", return_value=True), \
-         patch("waggle.recovery._send_mcp_reconnect", new_callable=AsyncMock), \
          patch("waggle.recovery._enforce_permissions"):
         await restart_recovery(q, db)
 
@@ -218,7 +215,6 @@ async def test_multiple_workers_mixed(db):
         return session_id != "sess-m3"
 
     with patch("waggle.recovery._session_alive", side_effect=_alive), \
-         patch("waggle.recovery._send_mcp_reconnect", new_callable=AsyncMock), \
          patch("waggle.recovery._enforce_permissions"):
         result = await restart_recovery(q, db)
 

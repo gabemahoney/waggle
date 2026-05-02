@@ -124,7 +124,6 @@ class TestTLSDaemonIntegration:
             "database_path": str(tmp_path / "state.db"),
             "queue_path": str(tmp_path / "queue.db"),
             "http_port": 8422,
-            "mcp_worker_port": 8423,
             "tls_cert_path": "",
             "tls_key_path": "",
             "state_poll_interval_seconds": 2,
@@ -134,7 +133,6 @@ class TestTLSDaemonIntegration:
         with patch("waggle.daemon.get_config", return_value=base_cfg), \
              patch("waggle.daemon.get_db_path", return_value=str(tmp_path / "state.db")), \
              patch("waggle.daemon.get_http_port", return_value=8422), \
-             patch("waggle.daemon.get_mcp_worker_port", return_value=8423), \
              patch("waggle.daemon.init_schema"), \
              patch("waggle.rest.set_inbound_queue"), \
              patch("waggle.daemon.get_inbound_queue", return_value=MagicMock()), \

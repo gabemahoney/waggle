@@ -26,7 +26,6 @@ def db_path(tmp_path, monkeypatch):
             "database_path": path,
             "max_workers": 3,
             "repos_path": str(tmp_path / "repos"),
-            "mcp_worker_port": 8423,
         },
     )
     return path

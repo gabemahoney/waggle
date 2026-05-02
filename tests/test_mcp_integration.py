@@ -6,7 +6,7 @@ sufficient for single-caller tests; multi-caller tests call engine directly.
 """
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 from waggle import engine, server
 from waggle.database import init_schema
@@ -38,7 +38,6 @@ def db_path(tmp_path, monkeypatch):
             "database_path": path,
             "max_workers": 3,
             "repos_path": str(tmp_path / "repos"),
-            "mcp_worker_port": 8423,
         },
     )
     return path
@@ -190,7 +189,6 @@ async def test_concurrency_limit(tmp_path, monkeypatch, mock_tmux):
             "database_path": path,
             "max_workers": 2,
             "repos_path": str(tmp_path / "repos"),
-            "mcp_worker_port": 8423,
         },
     )
 
@@ -253,30 +251,21 @@ async def test_response_shapes(db_path, mock_tmux):
 
 
 # ---------------------------------------------------------------------------
-# Test 5: send_input (Claude Channels)
+# Test 5: send_input (tmux send-keys)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_send_input_integration(db_path, mock_tmux):
-    """send_input delivers to a connected worker; errors on disconnected."""
+    """send_input delivers to a worker via tmux send-keys."""
     await register_caller(caller_type="local", ctx=None)
     result = await spawn_worker(model="sonnet", repo="/some/repo", ctx=None)
     worker_id = result["worker_id"]
 
-    # Worker not yet in registry → worker_not_connected
-    with patch("waggle.worker_mcp.registry") as mock_registry:
-        mock_registry.get.return_value = None
-        result = await send_input(worker_id=worker_id, text="hello", ctx=None)
-    assert result == {"error": "worker_not_connected"}
-
-    # Worker connects (added to registry with a mock session)
-    mock_session = MagicMock()
-    mock_session._write_stream.send = AsyncMock()
-
-    with patch("waggle.worker_mcp.registry") as mock_registry:
-        mock_registry.get.return_value = mock_session
+    # send_input succeeds via tmux send_keys
+    with patch("waggle.engine.tmux.send_keys", new_callable=AsyncMock) as mock_send:
+        mock_send.return_value = {"status": "success"}
         result = await send_input(worker_id=worker_id, text="hello", ctx=None)
 
     assert result == {"worker_id": worker_id, "delivered": True}
-    mock_session._write_stream.send.assert_awaited_once()
+    mock_send.assert_awaited_once()

@@ -2,9 +2,9 @@
 
 ## Overview
 
-`send_input` delivers freeform text to a running worker via the Claude Channels notification mechanism. It requires no tmux interaction and performs no TUI navigation — the text arrives in the worker Claude's context as a channel message.
+`send_input` delivers freeform text to a running worker via `tmux send-keys`. It writes the text directly to the worker's tmux pane, simulating keyboard input so the text appears at the Claude prompt.
 
-Defined in `src/waggle/engine.py`. Delivery is handled via the worker's registered `ServerSession` in `WorkerRegistry`.
+Defined in `src/waggle/engine.py`. Delivery is handled via `src/waggle/tmux.py`.
 
 ## Parameters
 
@@ -13,27 +13,19 @@ Defined in `src/waggle/engine.py`. Delivery is handled via the worker's register
 | `worker_id` | `str` | Yes | — | UUID of the target worker |
 | `text` | `str` | Yes | — | Freeform text to deliver to the worker |
 
-> **Note:** There is no `pane_id`, `session_id`, or `custom_text` parameter. Those were v1 concepts tied to tmux-based delivery.
-
 ## Flow
 
 1. **DB lookup + caller scope check** — find worker by `worker_id`; return `worker_not_found` if not present or caller doesn't own it
-2. **WorkerRegistry lookup** — resolve the worker's `ServerSession` from the in-memory registry; return `worker_not_connected` if no session is registered
-3. **Send notification** — call `ServerSession.send_notification("notifications/claude/channel", {"content": text, "meta": {"worker_id": worker_id}})` 
+2. **Resolve session** — get `session_id` from the worker row
+3. **Send via tmux** — call `tmux.send_keys(session_id, text)` which issues `tmux send-keys` to the worker's pane, followed by `Enter`
 4. **Return** `{worker_id, delivered: true}`
-
-## Worker Registration
-
-Workers connect to the waggle worker MCP server (port `8423`) using the `?worker_id={uuid}` query parameter embedded in their per-worker MCP config. Registration is automatic: `WorkerRegistrationMiddleware` intercepts the `tools/list` request that fires during MCP client initialization and stores the active `ServerSession` in `WorkerRegistry`. No explicit tool call is required. The `register_worker` tool still exists as a fallback but is no longer the primary registration path.
-
-See `spawn_worker.md` for how the per-worker MCP config is written at spawn time.
 
 ## Errors
 
 | Error | Condition |
 |-------|-----------|
 | `worker_not_found` | `worker_id` not in DB, or `caller_id` doesn't match |
-| `worker_not_connected` | Worker exists in DB but has no registered session in `WorkerRegistry` |
+| tmux delivery error (runtime) | `tmux.send_keys` fails (e.g. session was killed); returns `{"error": "<tmux error message>"}` |
 
 ## Return Contract
 
@@ -43,10 +35,6 @@ On success:
 {"worker_id": "<uuid>", "delivered": true}
 ```
 
-## v1 Replacement Note
-
-This replaces v1's `send_command` tool, which sent keystrokes to a tmux pane to navigate the Claude TUI. v2 uses no tmux interaction for input delivery — text is pushed directly to the worker's Claude Channels session via MCP notification.
-
 ## Sequence Diagram
 
 ```mermaid
@@ -54,9 +42,9 @@ sequenceDiagram
     participant C as Caller
     participant E as engine.py
     participant DB as SQLite DB
-    participant WR as WorkerRegistry
-    participant SS as ServerSession (worker)
-    participant W as Worker Claude
+    participant TM as tmux.py
+    participant TX as tmux/libtmux
+    participant W as Worker Claude (pane)
 
     C->>E: send_input(caller_id, worker_id, text)
 
@@ -66,15 +54,10 @@ sequenceDiagram
         E-->>C: {error: "worker_not_found"}
     end
 
-    Note over E: Step 2: WorkerRegistry lookup
-    E->>WR: get(worker_id)
-    alt no session registered
-        E-->>C: {error: "worker_not_connected"}
-    end
-
-    Note over E: Step 3: Send notification
-    E->>SS: send_notification("notifications/claude/channel", {"content": text, "meta": {"worker_id": worker_id}})
-    SS->>W: channel message arrives in context
+    Note over E: Step 2-3: Send via tmux
+    E->>TM: send_keys(session_id, text)
+    TM->>TX: pane.send_keys(text, enter=True)
+    TX-->>W: keystrokes delivered to pane
 
     E-->>C: {worker_id, delivered: true}
 ```

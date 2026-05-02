@@ -253,7 +253,6 @@ def patch_config(db_path: str, authorized_keys_path: str):
         "max_workers": 8,
         "authorized_keys_path": authorized_keys_path,
         "http_port": 8422,
-        "mcp_worker_port": 8423,
         "state_poll_interval_seconds": 2,
         "output_capture_lines": 50,
         "relay_timeout_seconds": 3600,

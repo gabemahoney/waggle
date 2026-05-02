@@ -1,5 +1,7 @@
 # Spike: Claude Channels — `notifications/claude/channel`
 
+> **SUPERSEDED:** This approach was not adopted. The Claude Channels mechanism was replaced by `tmux send-keys` for input delivery. Workers now launch as plain `claude --model {model}` sessions with no `--mcp-config` or `--dangerously-load-development-channels` flags. See `docs/architecture/send_input.md` for the current design.
+
 **Date:** 2026-04-27  
 **SRD Reference:** §4  
 **Test file:** `tests/spikes/test_channel_notification_spike.py`

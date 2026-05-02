@@ -4,8 +4,6 @@ Caller-type agnostic — no MCP or HTTP types in signatures.
 All operations return plain dicts; errors use an "error" key.
 """
 
-import json
-import shutil
 import uuid
 from pathlib import Path
 
@@ -112,27 +110,10 @@ async def spawn_worker(
 
     session_id = session_result["session_id"]
 
-    # Step 5b: Write per-worker MCP config
-    mcp_worker_port = int(cfg["mcp_worker_port"])
-    worker_config_dir = Path.home() / ".waggle" / "worker-configs" / worker_id
-    worker_config_dir.mkdir(parents=True, exist_ok=True)
-    mcp_config_path = worker_config_dir / "mcp.json"
-    mcp_config_path.write_text(
-        json.dumps({
-            "mcpServers": {
-                "waggle-worker": {
-                    "type": "http",
-                    "url": f"http://localhost:{mcp_worker_port}/mcp?worker_id={worker_id}",
-                }
-            }
-        })
-    )
-
     # Step 6: Launch claude
-    launch_result = await tmux.launch_agent_in_pane(session_id, model, mcp_config_path=str(mcp_config_path))
+    launch_result = await tmux.launch_agent_in_pane(session_id, model)
     if launch_result.get("status") != "success":
         await tmux.kill_session(session_id)
-        shutil.rmtree(worker_config_dir, ignore_errors=True)
         return {"error": launch_result.get("message", "launch_agent_in_pane failed")}
 
     # Step 7: Insert into DB
@@ -241,7 +222,7 @@ async def get_output(caller_id: str, worker_id: str, scrollback: int = 200) -> d
 
 
 async def send_input(caller_id: str, worker_id: str, text: str) -> dict:
-    """Send text input to a worker via Claude Channels notification.
+    """Send text input to a worker via tmux send-keys.
 
     Args:
         caller_id: Caller sending the input (scope check).
@@ -250,33 +231,20 @@ async def send_input(caller_id: str, worker_id: str, text: str) -> dict:
 
     Returns:
         {"worker_id": str, "delivered": True}
-        or {"error": "worker_not_found"} / {"error": "worker_not_connected"}
+        or {"error": "worker_not_found"}
     """
     with database.connection(_db_path()) as conn:
         row = conn.execute(
-            "SELECT worker_id FROM workers WHERE worker_id = ? AND caller_id = ?",
+            "SELECT session_id FROM workers WHERE worker_id = ? AND caller_id = ?",
             (worker_id, caller_id),
         ).fetchone()
 
     if row is None:
         return {"error": "worker_not_found"}
 
-    from waggle.worker_mcp import registry
-
-    session = registry.get(worker_id)
-    if session is None:
-        return {"error": "worker_not_connected"}
-
-    from mcp.types import JSONRPCNotification, JSONRPCMessage
-    from mcp.shared.session import SessionMessage
-
-    notification = JSONRPCNotification(
-        jsonrpc="2.0",
-        method="notifications/claude/channel",
-        params={"content": text, "meta": {"worker_id": worker_id}},
-    )
-    session_message = SessionMessage(message=JSONRPCMessage(notification))
-    await session._write_stream.send(session_message)
+    result = await tmux.send_keys(row["session_id"], text)
+    if result.get("status") != "success":
+        return {"error": result["message"]}
 
     return {"worker_id": worker_id, "delivered": True}
 
@@ -407,14 +375,6 @@ async def terminate_worker(caller_id: str, worker_id: str, force: bool = False) 
         return {"error": "worker_not_found"}
 
     await tmux.kill_session(row["session_id"])
-
-    # Clean up per-worker MCP config directory
-    worker_config_dir = Path.home() / ".waggle" / "worker-configs" / worker_id
-    shutil.rmtree(worker_config_dir, ignore_errors=True)
-
-    # Unregister from WorkerRegistry
-    from waggle.worker_mcp import registry
-    registry.unregister(worker_id)
 
     with database.connection(db_path) as conn:
         conn.execute(

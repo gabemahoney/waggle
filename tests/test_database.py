@@ -47,7 +47,7 @@ class TestSchemaCreation:
         conn.close()
         expected = {
             "worker_id", "caller_id", "session_name", "session_id", "model",
-            "repo", "status", "output", "mcp_session_id", "created_at", "updated_at",
+            "repo", "status", "output", "created_at", "updated_at",
         }
         assert columns == expected
 
