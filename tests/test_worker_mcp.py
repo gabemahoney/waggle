@@ -278,3 +278,16 @@ class TestWorkerRegistrationMiddleware:
             result = await WorkerRegistrationMiddleware().on_list_tools(mock_ctx, mock_call_next)
 
         assert result == ["tool-a", "tool-b"]
+
+
+# ---------------------------------------------------------------------------
+# Capability advertisement
+# ---------------------------------------------------------------------------
+
+
+def test_worker_mcp_advertises_channel_capability():
+    """worker_mcp server must advertise claude/channel experimental capability."""
+    from waggle.worker_mcp import worker_mcp
+    opts = worker_mcp._mcp_server.create_initialization_options()
+    assert opts.capabilities.experimental is not None
+    assert "claude/channel" in opts.capabilities.experimental

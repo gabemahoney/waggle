@@ -70,7 +70,21 @@ class WorkerRegistrationMiddleware(Middleware):
 
 
 worker_mcp = FastMCP("waggle-worker")
-worker_mcp._capabilities_config = {"experimental": {"claude/channel": {}}}
+
+_orig_create = worker_mcp._mcp_server.create_initialization_options
+
+
+def _patched_create(notification_options=None, experimental_capabilities=None, **kwargs):
+    ec = dict(experimental_capabilities or {})
+    ec["claude/channel"] = {}
+    return _orig_create(
+        notification_options=notification_options,
+        experimental_capabilities=ec,
+        **kwargs,
+    )
+
+
+worker_mcp._mcp_server.create_initialization_options = _patched_create
 worker_mcp.add_middleware(WorkerRegistrationMiddleware())
 
 
