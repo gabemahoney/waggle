@@ -196,6 +196,8 @@ Terminate a worker and clean up its tmux session and database row.
 
 **Returns:** `{"worker_id": str, "terminated": true}` or `{"error": "worker_not_found"}`
 
+---
+
 ### `send_input`
 
 Send text input to a worker via tmux send-keys.
@@ -209,6 +211,8 @@ Send text input to a worker via tmux send-keys.
 
 **Returns:** `{"worker_id": str, "delivered": true}` or `{"error": "worker_not_found"}`
 
+---
+
 ### `approve_permission`
 
 Approve or deny a worker's pending permission request.
@@ -221,6 +225,8 @@ Approve or deny a worker's pending permission request.
 | `decision` | `str` | Yes | "allow" or "deny" |
 
 **Returns:** `{"worker_id": str, "delivered": true}` or `{"error": "worker_not_found"}` / `{"error": "no_pending_permission"}`
+
+---
 
 ### `answer_question`
 
@@ -239,15 +245,18 @@ Answer a worker's pending AskUserQuestion.
 
 ## Architecture
 
-Waggle v2 has 7 components:
+Waggle v2 has 10 components:
 
 1. **HTTP Daemon** (`daemon.py`) — Uvicorn server binding to `127.0.0.1` on the configured port (default 8422). Initializes the database schema on startup.
 2. **MCP Server** (`server.py`) — FastMCP instance mounted at `/mcp` inside a Starlette application. Thin tool adapters that extract caller identity from the MCP session context and delegate to the engine.
 3. **Core Engine** (`engine.py`) — All business logic: spawn, terminate, status checks, output capture. Returns plain dicts with an `"error"` key on failure. No MCP or HTTP types in signatures.
 4. **SQLite Database** — 4 tables: `workers`, `callers`, `requests`, `pending_relays`. WAL mode enabled for concurrent reads during hook writes.
 5. **tmux Manager** (`tmux.py`) — Session creation, pane capture, and agent launch via libtmux. Sets `WAGGLE_WORKER_ID` in the tmux environment so hooks can identify the worker.
-6. **State Parser** (`state_parser.py`) — Classifies raw pane content into agent states (working / waiting / ask_user / check_permission / done / unknown).
-7. **CLI** (`cli.py`) — `waggle serve` starts the daemon. Hook commands: `waggle set-state [state]`, `waggle set-state --delete`, `waggle permission-request`, `waggle ask-relay`.
+6. **State Parser** (`state_parser.py`) — Fallback state classifier. When `waggle set-state` is called without an explicit state argument, parses raw pane content to determine the agent state. Primary state detection is hook-driven: hooks call `waggle set-state <state>` directly, bypassing the parser entirely.
+7. **CLI** (`cli.py`) — `waggle serve` starts the daemon. Hook commands: `waggle set-state [state]`, `waggle set-state --delete`, `waggle permission-request`, `waggle ask-relay`. `waggle sting` emits a CLI reference when the waggle MCP server is not configured.
+8. **REST API** (`rest.py`) — Additional HTTP endpoints mounted at `/api/v1`, used by CMA callers for async request/response patterns.
+9. **State Monitor** (`state_monitor.py`) — Background task that polls the workers table at `state_poll_interval_seconds` intervals, detects dead tmux sessions, and enqueues CMA notifications on state transitions.
+10. **Queue System** (`queue.py`, `inbound_processor.py`, `outbound_processor.py`) — SQLite-backed message queue for CMA caller communication. Inbound processor handles incoming CMA requests; outbound processor delivers state-change notifications back to CMA callers.
 
 ## Configuration
 

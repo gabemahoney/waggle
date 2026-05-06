@@ -4,7 +4,11 @@
 
 `waggle set-state` is a Python CLI subcommand that replaces the v1 bash hook. It is how workers report state back to waggle — called by Claude Code hooks on state-change events.
 
-Defined in `src/waggle/cli.py` (`_handle_set_state`). Reads worker identity from the tmux session environment, captures the current pane output, parses agent state, and upserts the result to the `workers` table.
+Defined in `src/waggle/cli.py` (`_handle_set_state`). Reads worker identity from the tmux session environment and updates the worker's state in the `workers` table.
+
+There are two execution paths:
+- **Explicit state (primary):** When called with a state argument (e.g., `waggle set-state waiting`), sets `workers.status` directly and exits. All standard hooks use this path — no pane capture or state_parser involved.
+- **Fallback (no argument):** When called without a state argument, captures pane output and classifies state via `state_parser.parse()`. Also stores the captured output in `workers.output`.
 
 ## CLI Interface
 
@@ -27,11 +31,12 @@ Defined in `src/waggle/cli.py` (`_handle_set_state`). Reads worker identity from
 1. **Read WAGGLE_WORKER_ID** — run `tmux show-environment WAGGLE_WORKER_ID` to get the worker UUID
 2. **Not set → exit 0** — if the variable is absent or prefixed with `-` (unset), this is not a waggle session; exit silently
 3. **`--delete` path** — if `--delete` flag is set, `DELETE FROM workers WHERE worker_id = ?` and exit 0
-4. **DB lookup** — `SELECT session_id FROM workers WHERE worker_id = ?`; if not found, exit 0
-5. **Capture pane** — call `_capture_pane_sync(session_id, None, 200)` to capture 200 lines of scrollback
-6. **Parse state** — call `state_parser.parse(content)` to determine the current agent state
-7. **Map unknown → done** — if state_parser returns `unknown`, treat it as `done`
-8. **Upsert** — `UPDATE workers SET status = ?, output = ?, updated_at = CURRENT_TIMESTAMP WHERE worker_id = ?`
+4. **Explicit state path (primary)** — if a state argument was provided, `UPDATE workers SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE worker_id = ?` and exit 0; pane capture and state_parser are skipped entirely
+5. **DB lookup** — `SELECT session_id FROM workers WHERE worker_id = ?`; if not found, exit 0 (fallback path only)
+6. **Capture pane** — call `_capture_pane_sync(session_id, None, 200)` to capture 200 lines of scrollback
+7. **Parse state** — call `state_parser.parse(content)` to determine the current agent state
+8. **Map unknown → done** — if state_parser returns `unknown`, treat it as `done`
+9. **Upsert** — `UPDATE workers SET status = ?, output = ?, updated_at = CURRENT_TIMESTAMP WHERE worker_id = ?` (also stores captured output)
 
 ## WAGGLE_WORKER_ID
 
@@ -91,7 +96,7 @@ sequenceDiagram
     participant SP as state_parser
     participant DB as SQLite DB
 
-    H->>CLI: waggle set-state [--delete]
+    H->>CLI: waggle set-state [state] [--delete]
 
     Note over CLI: Step 1-2: Read WAGGLE_WORKER_ID
     CLI->>TX: tmux show-environment WAGGLE_WORKER_ID
@@ -106,22 +111,29 @@ sequenceDiagram
         CLI-->>H: exit 0
     end
 
-    Note over CLI: Step 4: DB lookup
+    alt explicit state argument (primary path — all standard hooks)
+        Note over CLI: Step 4: Explicit state path
+        CLI->>DB: UPDATE workers SET status=?, updated_at=NOW WHERE worker_id=?
+        DB-->>CLI: ok
+        CLI-->>H: exit 0
+    end
+
+    Note over CLI: Step 5: DB lookup (fallback path — no state arg)
     CLI->>DB: SELECT session_id FROM workers WHERE worker_id = ?
     alt not found
         CLI-->>H: exit 0 (no-op)
     end
 
-    Note over CLI: Step 5: Capture pane
+    Note over CLI: Step 6: Capture pane
     CLI->>TX: _capture_pane_sync(session_id, None, 200)
     TX-->>CLI: {status: "success", content}
 
-    Note over CLI: Steps 6-7: Parse + map state
+    Note over CLI: Steps 7-8: Parse + map state
     CLI->>SP: state_parser.parse(content)
     SP-->>CLI: (state, prompt_data)
     CLI->>CLI: if state == "unknown" → state = "done"
 
-    Note over CLI: Step 8: Upsert
+    Note over CLI: Step 9: Upsert (with output)
     CLI->>DB: UPDATE workers SET status=?, output=?, updated_at=NOW WHERE worker_id=?
     DB-->>CLI: ok
 
