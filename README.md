@@ -65,6 +65,7 @@ claude mcp list
 | `PreToolUse` (AskUserQuestion) | `waggle ask-relay` |
 | `PreToolUse` (other tools) | `waggle set-state working` |
 | `PostToolUse` | `waggle set-state working` |
+| `Notification` | `waggle set-state waiting` |
 | `Stop` | `waggle set-state waiting` |
 | `SessionEnd` | `waggle set-state --delete` |
 

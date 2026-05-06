@@ -22,12 +22,17 @@ __pycache__/
 *$py.class
 *.so
 .Python
+.venv/
 venv/
 env/
 ENV/
 *.egg-info/
 dist/
 build/
+uv.lock
+
+# Database files
+*.db
 
 # Node
 node_modules/
@@ -49,3 +54,4 @@ yarn-error.log*
 # Local development (tickets/features - dev branch only)
 bugs/
 features/
+resolvers/

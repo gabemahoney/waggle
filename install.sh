@@ -129,6 +129,7 @@ waggle_hooks = {
         {"matcher": "^(?!AskUserQuestion$).*", "hooks": [{"type": "command", "command": "waggle set-state working"}]}
     ],
     "PostToolUse": [{"hooks": [{"type": "command", "command": "waggle set-state working"}]}],
+    "Notification": [{"matcher": "*", "hooks": [{"type": "command", "command": "waggle set-state waiting"}]}],
     "Stop": [{"hooks": [{"type": "command", "command": "waggle set-state waiting"}]}],
     "SessionEnd": [{"hooks": [{"type": "command", "command": "waggle set-state --delete"}]}]
 }

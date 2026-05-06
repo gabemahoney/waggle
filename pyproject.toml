@@ -1,8 +1,9 @@
 [tool.poetry]
 name = "waggle"
 version = "0.1.0"
-description = "Database Layer for Agent State Management"
-authors = ["waggle"]
+description = "HTTP daemon for managing Claude Code worker agents in tmux sessions"
+authors = ["Gabe Mahoney"]
+license = "MIT"
 readme = "README.md"
 packages = [{include = "waggle", from = "src"}]
 
