@@ -197,6 +197,9 @@ When an agents checks on another agent it will also provide the following more d
 - done — session ended
 - unknown
 
+> [!TIP]
+> Configure your permission settings to auto-deny `AskUserQuestion` for spawned agents. `AskUserQuestion` is supported but Anthropics hooks for it seem a bit flaky.
+
 ### Advanced Usage
 
 The server also offers the ability to forcibly delete entries from the db if for some reason it ever gets into a bad state.
