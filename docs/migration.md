@@ -1,62 +1,92 @@
-# Waggle v1 → v2 Migration Guide
+# Migration: Daemon → Stdio MCP
 
-## What Changed
+This document walks an operator from a working old-Waggle installation (HTTP daemon + SQLite) to the new Waggle (stateless stdio MCP + Claude Status). There is **no in-place upgrade path** — this is a hard cutover.
 
-### Architecture
-| Aspect | v1 | v2 |
-|--------|----|----|
-| MCP transport | `stdio` (subprocess) | HTTP (`http://localhost:8422/mcp`) |
-| Hook scripts | Bash scripts in `~/.waggle/hooks/` | Python CLI commands (`waggle set-state`, etc.) |
-| Process model | Spawned per-Claude-session | Persistent background daemon (systemd) |
-| Remote access | Not supported | SSH-authenticated callers via `authorized_keys.json` |
-| Job queue | None | Durable SQLite-backed queue with retry and expiry |
-| PermissionRequest | Not handled | `waggle permission-request` relays to orchestrator |
-| AskUserQuestion | Not handled | `waggle ask-relay` relays to orchestrator |
+## What changed
 
-### Hook commands
-v1 hooks called `~/.waggle/hooks/waggle_set_state.sh`. v2 hooks call the `waggle` Python CLI directly — no bash wrapper scripts, no `~/.waggle/hooks/` directory.
+| Old Waggle | New Waggle |
+|-----------|-----------|
+| HTTP daemon (uvicorn, Starlette) | stdio MCP subprocess |
+| SQLite state database | Claude Status (external CLI) |
+| `waggle serve` | `waggle mcp` |
+| `waggle set-state`, `waggle permission-request`, `waggle ask-relay` | Removed — Claude Status handles state |
+| `register_caller`, `list_workers`, `check_status`, `approve_permission` MCP tools | Removed — use `claude-status` CLI directly |
+| `spawn_worker`, `send_input`, `get_output`, `terminate_worker`, `answer_question` | Retained, redesigned |
+| `list_spawned_workers` (new) | Added |
 
-### MCP registration
-v1: `claude mcp add --transport stdio waggle -- poetry run waggle serve`
-v2: `claude mcp add --transport http waggle http://localhost:8422/mcp` (daemon must already be running)
-
----
-
-## Upgrade Steps
-
-### 1. Uninstall v1
+## Step 1: Stop the old daemon
 
 ```bash
-./install.sh --uninstall
+systemctl --user stop waggle
+systemctl --user disable waggle
 ```
 
-This stops the process, removes hooks from `~/.claude/settings.json`, and prints a reminder to run:
+Remove the service file:
 
 ```bash
-claude mcp remove waggle
+rm -f ~/.config/systemd/user/waggle.service
+systemctl --user daemon-reload
 ```
 
-Run that command.
+## Step 2: Remove old waggle hooks from Claude settings
 
-### 2. Pull and install v2
+Edit `~/.claude/settings.json` and remove all hook entries that reference `waggle set-state`, `waggle permission-request`, or `waggle ask-relay`. The new `waggle install` command will write the replacement hooks.
+
+## Step 3: Delete the old database
+
+The SQLite database is no longer used. You can delete it:
 
 ```bash
-git pull
-./install.sh
+rm -rf ~/.waggle/
 ```
 
-The installer:
-- Runs `poetry install` (or `pip install -e .` if poetry is absent)
-- Deploys `waggle.service` to `~/.config/systemd/user/`
-- Enables and starts the daemon via systemctl
-- Merges v2 hooks into `~/.claude/settings.json`
-
-### 3. Register the HTTP MCP server
-
-The installer prints this command — run it once:
+## Step 4: Install the new package
 
 ```bash
-claude mcp add --transport http waggle http://localhost:8422/mcp
+cd /path/to/waggle   # your clone of this repo
+pip install .        # or: poetry install
+```
+
+## Step 5: Install Claude Status
+
+Install the `claude-status` binary on PATH. See the [Claude Status README](https://github.com/anthropics/claude-status) for platform-specific instructions.
+
+Verify:
+
+```bash
+claude-status capabilities
+```
+
+## Step 6: Wire hooks
+
+```bash
+waggle install
+```
+
+This runs `claude-status install-hooks` with the relay and AUQ mode settings Waggle requires. Optionally pass `--auq-order` to control hook ordering:
+
+```bash
+waggle install --auq-order before:other-hook
+```
+
+Verify health:
+
+```bash
+waggle sting
+```
+
+## Step 7: Register the new MCP server with Claude Code
+
+Remove the old HTTP transport registration first (if present):
+
+```bash
+claude mcp remove waggle 2>/dev/null || true
+```
+
+Add the new stdio transport:
+
+```bash
+claude mcp add --transport stdio waggle waggle mcp
 ```
 
 Verify:
@@ -65,81 +95,35 @@ Verify:
 claude mcp list
 ```
 
-### 4. Configure remote access (optional)
+## Step 8: Restart Claude Code
 
-To allow remote CMA callers, create `~/.waggle/authorized_keys.json`:
+Restart any Claude Code sessions that should use the new Waggle.
 
-```json
-[
-  {
-    "name": "my-cma-caller",
-    "public_key": "ssh-ed25519 AAAA..."
-  }
-]
-```
+## Step 9: Smoke test
 
----
+In an orchestrator Claude session, call the six surviving tools:
 
-## Database
+1. `spawn_worker` — verify `instance_id` and `session_name` are returned
+2. `list_spawned_workers` — verify the new worker appears
+3. `get_output` — verify pane content is returned
+4. `send_input` — send text to the worker pane
+5. `answer_question` — answer a pending question (if applicable)
+6. `terminate_worker` — kill the worker's tmux session
 
-There is no data migration. v2 uses a fresh database schema. If `~/.waggle/state.db` exists from v1, remove it:
+For state reads and permission approval that the old `check_status` and `approve_permission` tools handled, use `claude-status` directly:
 
 ```bash
-rm -f ~/.waggle/state.db ~/.waggle/queue.db
+claude-status worker <instance_id>       # full worker state
+claude-status decide <instance_id> allow # approve a pending permission
+claude-status decide <instance_id> deny  # deny a pending permission
 ```
 
-The daemon recreates both on startup.
+## Rollback
 
----
+There is no automated rollback. If you need to revert:
 
-## Configuration
-
-Create `~/.waggle/config.json` to override defaults. All keys are optional.
-
-```json
-{
-  "database_path": "~/.waggle/state.db",
-  "queue_path": "~/.waggle/queue.db",
-  "max_workers": 8,
-  "http_port": 8422,
-  "repos_path": "~/.waggle/repos",
-  "relay_timeout_seconds": 3600,
-  "authorized_keys_path": "~/.waggle/authorized_keys.json",
-  "admin_email": "",
-  "admin_notify_after_retries": 5,
-  "max_retry_hours": 72
-}
-```
-
-Key new fields:
-- `repos_path` — where remote repos are cloned
-- `authorized_keys_path` — SSH public keys for remote callers
-- `admin_email` — email for escalation after repeated worker failures
-- `relay_timeout_seconds` — how long to wait for orchestrator to resolve a permission or ask-relay event (default 1 hour)
-
----
-
-## Environment
-
-Create `~/.waggle/env` for secrets (loaded by systemd, file may be absent):
-
-```
-WAGGLE_CMA_API_KEY=your-key-here
-```
-
-This key is used by waggle's CMA client to notify remote orchestrators of worker state changes.
-
----
-
-## Verify the Daemon
-
-```bash
-systemctl --user status waggle
-curl http://localhost:8422/mcp
-```
-
-If the service fails to start:
-
-```bash
-journalctl --user -u waggle -n 50
-```
+1. Check out the previous release tag
+2. Re-install the old package
+3. Restore `~/.waggle/` from backup if needed
+4. Re-register `waggle serve` as a systemd user service
+5. Remove the new stdio MCP registration and re-add the HTTP one

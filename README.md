@@ -1,50 +1,40 @@
 # Waggle
 
-HTTP daemon for managing Claude Code worker agents in tmux sessions.
+Stateless stdio MCP server for managing Claude Code worker agents in tmux sessions.
 
 ## Overview
 
-Waggle is a standalone HTTP daemon that lets LLM orchestrators spawn, monitor, and terminate Claude Code worker agents running in tmux sessions.
+Waggle is a lightweight stdio MCP server. An orchestrator Claude adds Waggle as an MCP server, then uses the six Waggle tools to spawn, monitor, and control Claude Code worker agents running in tmux sessions.
 
-It exposes an MCP interface (via HTTP transport) for local orchestrators and a REST API for future remote access. It is **not** an stdio MCP subprocess — it runs as a persistent background service.
+Waggle delegates all state storage to [Claude Status](https://github.com/anthropics/claude-status), which it reads via the `claude-status` consumer CLI. Waggle itself holds no database and runs no background daemon.
+
+## Prerequisites
+
+- tmux 3.2a+
+- Python 3.10+
+- [`claude-status`](https://github.com/anthropics/claude-status) on PATH
 
 ## Installation
 
-**Dependencies:**
-- tmux 3.2a+
-- sqlite3
-- python3
-
-**Install Waggle:**
-
 ```bash
 git clone https://github.com/gabemahoney/waggle.git
 cd waggle
-./install.sh
+pip install .        # or: poetry install
+waggle install       # wires Claude Status hooks into ~/.claude/settings.json
 ```
 
-This installs Python dependencies, deploys the waggle systemd user service, and configures Claude hooks in `~/.claude/settings.json`.
+`waggle install` verifies that `claude-status` is available and runs `claude-status install-hooks` with the required relay and AUQ mode settings. Restart Claude Code after install.
 
-## Quick Start
-
-**1. Install**
+Verify everything is wired correctly:
 
 ```bash
-git clone https://github.com/gabemahoney/waggle.git
-cd waggle
-./install.sh
+waggle sting
 ```
 
-The daemon starts automatically as a systemd user service. Verify:
+## Register Waggle as an MCP server
 
 ```bash
-systemctl --user status waggle
-```
-
-**2. Register the MCP server with Claude Code**
-
-```bash
-claude mcp add --transport http waggle http://localhost:8422/mcp
+claude mcp add --transport stdio waggle waggle mcp
 ```
 
 Verify:
@@ -53,119 +43,50 @@ Verify:
 claude mcp list
 ```
 
-**3. Verify hooks**
-
-`install.sh` automatically merges the following hooks into `~/.claude/settings.json`:
-
-| Event | Command |
-|-------|---------|
-| `PermissionRequest` | `waggle permission-request` |
-| `SessionStart` | `waggle set-state waiting` |
-| `UserPromptSubmit` | `waggle set-state working` |
-| `PreToolUse` (AskUserQuestion) | `waggle ask-relay` |
-| `PreToolUse` (other tools) | `waggle set-state working` |
-| `PostToolUse` | `waggle set-state working` |
-| `Notification` | `waggle set-state waiting` |
-| `Stop` | `waggle set-state waiting` |
-| `SessionEnd` | `waggle set-state --delete` |
-
-Restart Claude Code after installation.
-
 ## MCP Tools
-
-### `register_caller`
-
-Register this caller with waggle. Call once at the start of a session.
-
-**Parameters:**
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `caller_type` | `str` | No | `"local"` | `"local"` or `"cma"` |
-
-**Returns:** `{"caller_id": str}`
-
----
 
 ### `spawn_worker`
 
-Spawn a new Claude Code worker agent in a tmux session.
-
-**Parameters:**
+Spawn a new Claude Code worker in a tmux session.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `model` | `str` | Yes | — | Claude model name (e.g. `"sonnet"`, `"haiku"`, `"opus"`) |
-| `repo` | `str` | Yes | — | Local path or GitHub HTTPS URL |
-| `session_name` | `str` | No | `None` | tmux session name; auto-generated as `waggle-{id[:8]}` if omitted |
+| `model` | `str` | Yes | — | Claude model (`"sonnet"`, `"haiku"`, `"opus"`) |
+| `repo` | `str` | Yes | — | Absolute local path to the repo |
+| `session_name` | `str` | No | auto | tmux session name; auto-generated as `waggle-{id[:8]}` if omitted |
 
-**Returns:** `{"worker_id": str, "session_name": str}` or `{"error": str}`
-
-**Errors:**
-- `concurrency_limit_reached` — active worker count is at `max_workers`
-- `repo_clone_failed` — git clone or fetch failed
-- `invalid_repo` — URL cannot be parsed
+Returns: `{"ok": true, "instance_id": str, "session_name": str}`
 
 ---
 
-### `list_workers`
+### `list_spawned_workers`
 
-List all workers belonging to this caller.
+List all Waggle-managed workers visible via Claude Status.
 
-**Parameters:** none (caller scoped automatically via MCP session)
-
-**Returns:**
+Returns:
 ```json
 {
+  "ok": true,
   "workers": [
-    {
-      "worker_id": "...",
-      "caller_id": "...",
-      "session_name": "waggle-abc12345",
-      "session_id": "$1",
-      "model": "sonnet",
-      "repo": "/path/to/repo",
-      "status": "working",
-      "output": "...",
-      "updated_at": "2026-04-27T12:00:00"
-    }
+    {"instance_id": "...", "session_name": "waggle-abc12345"}
   ]
 }
 ```
 
+To read full worker details (status, pending requests, labels), use `claude-status workers` or `claude-status worker <instance_id>` directly.
+
 ---
 
-### `check_status`
+### `send_input`
 
-Check the current status of a specific worker.
-
-**Parameters:**
+Send text to a worker's tmux pane without pressing Enter.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `worker_id` | `str` | Yes | Worker UUID |
+| `session_name` | `str` | Yes | tmux session name |
+| `text` | `str` | Yes | Text to deliver (no implicit Enter) |
 
-**Returns:**
-```json
-{
-  "worker_id": "...",
-  "status": "working",
-  "output_lines": "...",
-  "updated_at": "...",
-  "pending_relay": null
-}
-```
-
-Or `{"error": "worker_not_found"}`.
-
-`pending_relay` is non-null when a relay event is queued for the worker: `{"relay_id", "relay_type", "details"}`.
-
-**Worker statuses:**
-- `working` — agent is actively processing
-- `waiting` — agent is idle at the prompt
-- `ask_user` — agent is showing an AskUserQuestion prompt
-- `check_permission` — agent is waiting for tool approval
-- `done` — session ended
+Returns: `{"ok": true, "operation": "send_input"}`
 
 ---
 
@@ -173,182 +94,84 @@ Or `{"error": "worker_not_found"}`.
 
 Capture recent pane output from a worker's tmux session.
 
-**Parameters:**
-
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `worker_id` | `str` | Yes | — | Worker UUID |
-| `scrollback` | `int` | No | `200` | Lines of scrollback to capture |
+| `session_name` | `str` | Yes | — | tmux session name |
+| `scrollback` | `int` | No | `50` | Lines to capture (1–1000) |
 
-**Returns:** `{"worker_id": str, "lines": str}` or `{"error": "worker_not_found"}`
+Returns: `{"ok": true, "content": str}`
 
 ---
 
 ### `terminate_worker`
 
-Terminate a worker and clean up its tmux session and database row.
-
-**Parameters:**
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `worker_id` | `str` | Yes | — | Worker UUID |
-| `force` | `bool` | No | `false` | Reserved for future use |
-
-**Returns:** `{"worker_id": str, "terminated": true}` or `{"error": "worker_not_found"}`
-
----
-
-### `send_input`
-
-Send text input to a worker via tmux send-keys.
-
-**Parameters:**
+Kill a worker's tmux session.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `worker_id` | `str` | Yes | Worker UUID |
-| `text` | `str` | Yes | Text content to deliver |
+| `session_name` | `str` | Yes | tmux session name |
 
-**Returns:** `{"worker_id": str, "delivered": true}` or `{"error": "worker_not_found"}`
-
----
-
-### `approve_permission`
-
-Approve or deny a worker's pending permission request.
-
-**Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `worker_id` | `str` | Yes | Worker UUID |
-| `decision` | `str` | Yes | "allow" or "deny" |
-
-**Returns:** `{"worker_id": str, "delivered": true}` or `{"error": "worker_not_found"}` / `{"error": "no_pending_permission"}`
+Returns: `{"ok": true, "operation": "terminate_worker"}`
 
 ---
 
 ### `answer_question`
 
-Answer a worker's pending AskUserQuestion.
-
-**Parameters:**
+Answer a worker's pending `AskUserQuestion`. The question text must still be visible in the pane.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `worker_id` | `str` | Yes | Worker UUID |
-| `answer` | `str` | Yes | The answer text |
+| `question_id` | `int` | Yes | `request_id` from the pending ask_user_question |
+| `answer` | `str` | Yes | Answer text to deliver |
 
-**Returns:** `{"worker_id": str, "delivered": true}` or `{"error": "worker_not_found"}` / `{"error": "no_pending_question"}`
+Returns: `{"ok": true, "operation": "answer_question"}`
+
+---
+
+## Error shape
+
+Every tool returns an `ok` boolean. On failure:
+
+```json
+{
+  "ok": false,
+  "operation": "spawn_worker",
+  "err_name": "ErrTmuxNewSession",
+  "err_description": "session already exists"
+}
+```
+
+---
+
+## State and permissions
+
+Waggle does not manage permissions or worker state directly. Use `claude-status` for that:
+
+```bash
+# Read worker state
+claude-status worker <instance_id>
+
+# Approve or deny a pending permission request
+claude-status decide <instance_id> allow
+claude-status decide <instance_id> deny
+```
 
 ---
 
 ## Architecture
 
-Waggle v2 has 10 components:
+Waggle is three thin layers:
 
-1. **HTTP Daemon** (`daemon.py`) — Uvicorn server binding to `127.0.0.1` on the configured port (default 8422). Initializes the database schema on startup.
-2. **MCP Server** (`server.py`) — FastMCP instance mounted at `/mcp` inside a Starlette application. Thin tool adapters that extract caller identity from the MCP session context and delegate to the engine.
-3. **Core Engine** (`engine.py`) — All business logic: spawn, terminate, status checks, output capture. Returns plain dicts with an `"error"` key on failure. No MCP or HTTP types in signatures.
-4. **SQLite Database** — 4 tables: `workers`, `callers`, `requests`, `pending_relays`. WAL mode enabled for concurrent reads during hook writes.
-5. **tmux Manager** (`tmux.py`) — Session creation, pane capture, and agent launch via libtmux. Sets `WAGGLE_WORKER_ID` in the tmux environment so hooks can identify the worker.
-6. **State Parser** (`state_parser.py`) — Fallback state classifier. When `waggle set-state` is called without an explicit state argument, parses raw pane content to determine the agent state. Primary state detection is hook-driven: hooks call `waggle set-state <state>` directly, bypassing the parser entirely.
-7. **CLI** (`cli.py`) — `waggle serve` starts the daemon. Hook commands: `waggle set-state [state]`, `waggle set-state --delete`, `waggle permission-request`, `waggle ask-relay`. `waggle sting` emits a CLI reference when the waggle MCP server is not configured.
-8. **REST API** (`rest.py`) — Additional HTTP endpoints mounted at `/api/v1`, used by CMA callers for async request/response patterns.
-9. **State Monitor** (`state_monitor.py`) — Background task that polls the workers table at `state_poll_interval_seconds` intervals, detects dead tmux sessions, and enqueues CMA notifications on state transitions.
-10. **Queue System** (`queue.py`, `inbound_processor.py`, `outbound_processor.py`) — SQLite-backed message queue for CMA caller communication. Inbound processor handles incoming CMA requests; outbound processor delivers state-change notifications back to CMA callers.
+1. **`mcp_stdio.py`** — FastMCP stdio server; wraps each tool with SR-7.1 error handling
+2. **`spawn.py`** — tool implementations; the only subprocess calls are to `tmux` (via `_tmux` seam) and `claude-status` (via `waggle.claude_status._run` seam)
+3. **`claude_status.py`** — consumer CLI client for `claude-status workers/worker/capabilities`
 
-## Configuration
+No HTTP, no SQLite, no background threads.
 
-Create `~/.waggle/config.json` to override defaults. All keys are optional.
+## Migrating from the old HTTP daemon
 
-```json
-{
-  "database_path": "~/.waggle/state.db",
-  "queue_path": "~/.waggle/queue.db",
-  "max_workers": 8,
-  "http_port": 8422,
-  "repos_path": "~/.waggle/repos",
-  "relay_timeout_seconds": 3600,
-  "state_poll_interval_seconds": 2,
-  "output_capture_lines": 50,
-  "authorized_keys_path": "~/.waggle/authorized_keys.json",
-  "admin_email": "",
-  "admin_notify_after_retries": 5,
-  "max_retry_hours": 72,
-  "tls_cert_path": "",
-  "tls_key_path": ""
-}
-```
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `database_path` | `~/.waggle/state.db` | Path to the SQLite state database |
-| `queue_path` | `~/.waggle/queue.db` | Path to the queue database |
-| `max_workers` | `8` | Maximum concurrent workers (global) |
-| `http_port` | `8422` | Port for the HTTP daemon |
-| `repos_path` | `~/.waggle/repos` | Directory where remote repos are cloned |
-| `relay_timeout_seconds` | `3600` | How long pending relays are retained |
-| `state_poll_interval_seconds` | `2` | Polling interval for state updates |
-| `output_capture_lines` | `50` | Default lines captured for output snapshots |
-| `authorized_keys_path` | `~/.waggle/authorized_keys.json` | Authorized keys for remote access |
-| `admin_email` | `""` | Email for admin notifications |
-| `admin_notify_after_retries` | `5` | Retry count before notifying admin |
-| `max_retry_hours` | `72` | Maximum hours to retry failed operations |
-| `tls_cert_path` | `""` | TLS certificate path (future HTTPS support) |
-| `tls_key_path` | `""` | TLS key path (future HTTPS support) |
-
-## Troubleshooting
-
-**Verify dependencies:**
-
-```bash
-which tmux sqlite3 python3
-```
-
-All commands must be found. Install missing dependencies via package manager.
-
-**Verify database access:**
-
-```bash
-sqlite3 ~/.waggle/state.db "SELECT COUNT(*) FROM workers;"
-```
-
-Should return a count without error. If the file is locked, find what holds it:
-
-```bash
-lsof ~/.waggle/state.db
-```
-
-**Recover from corruption:**
-
-```bash
-rm ~/.waggle/state.db
-```
-
-The daemon recreates the schema on next startup.
-
-**Check daemon is running:**
-
-```bash
-curl http://localhost:8422/mcp
-```
-
-If unreachable, start the daemon with `waggle serve`.
-
-## Security
-
-**WARNING: No access control implemented.**
-
-- The HTTP daemon binds to `127.0.0.1` only (not accessible over the network by default)
-- Database is unprotected (filesystem permissions only)
-- Any local process can read/write worker state
-
-**Suitable for single-user development environments only.**
-
-Do not expose the waggle port externally or use waggle on shared systems with sensitive data.
+See [docs/migration.md](docs/migration.md) for step-by-step instructions on moving from the daemon + SQLite installation to the new stdio MCP + Claude Status setup.
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) file for details.
+MIT License — see [LICENSE](LICENSE) file for details.

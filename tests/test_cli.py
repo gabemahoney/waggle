@@ -1,4 +1,4 @@
-"""Unit tests for the CLI dispatcher."""
+"""Unit tests for the CLI dispatcher (surviving subcommands only)."""
 
 import sys
 
@@ -15,12 +15,6 @@ class TestCLIHelp:
             main()
         assert exc_info.value.code == 0
 
-    def test_serve_help_exits_0(self, monkeypatch):
-        monkeypatch.setattr(sys, "argv", ["waggle", "serve", "--help"])
-        with pytest.raises(SystemExit) as exc_info:
-            main()
-        assert exc_info.value.code == 0
-
     def test_no_subcommand_exits_0(self, monkeypatch, capsys):
         monkeypatch.setattr(sys, "argv", ["waggle"])
         with pytest.raises(SystemExit) as exc_info:
@@ -28,14 +22,6 @@ class TestCLIHelp:
         assert exc_info.value.code == 0
         captured = capsys.readouterr()
         assert "usage:" in captured.out.lower()
-
-
-class TestServeSubcommand:
-    def test_serve_calls_daemon_run(self, monkeypatch):
-        monkeypatch.setattr(sys, "argv", ["waggle", "serve"])
-        with patch("waggle.daemon.run") as mock_run:
-            main()
-            mock_run.assert_called_once_with()
 
 
 class TestUsageErrors:
@@ -55,28 +41,15 @@ class TestUsageErrors:
         assert captured.err == ""
 
 
-class TestSetStateSubcommand:
-    def test_set_state_help_exits_0(self, monkeypatch):
-        monkeypatch.setattr(sys, "argv", ["waggle", "set-state", "--help"])
+class TestRemovedSubcommands:
+    """Verify daemon-era subcommands are gone."""
+
+    @pytest.mark.parametrize("sub", ["serve", "set-state", "permission-request", "ask-relay"])
+    def test_removed_subcommand_exits_nonzero(self, sub, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["waggle", sub])
         with pytest.raises(SystemExit) as exc_info:
             main()
-        assert exc_info.value.code == 0
-
-    def test_set_state_calls_handler(self, monkeypatch):
-        monkeypatch.setattr(sys, "argv", ["waggle", "set-state"])
-        with patch("waggle.cli._handle_set_state") as mock_handler:
-            main()
-            mock_handler.assert_called_once()
-            args = mock_handler.call_args[0][0]
-            assert args.delete is False
-
-    def test_set_state_delete_flag(self, monkeypatch):
-        monkeypatch.setattr(sys, "argv", ["waggle", "set-state", "--delete"])
-        with patch("waggle.cli._handle_set_state") as mock_handler:
-            main()
-            mock_handler.assert_called_once()
-            args = mock_handler.call_args[0][0]
-            assert args.delete is True
+        assert exc_info.value.code != 0
 
 
 class TestStingSubcommand:
@@ -85,3 +58,38 @@ class TestStingSubcommand:
         with patch("waggle.sting.handle_sting") as mock_handler:
             main()
             mock_handler.assert_called_once()
+
+
+class TestMcpSubcommand:
+    def test_mcp_calls_run(self, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["waggle", "mcp"])
+        with patch("waggle.mcp_stdio.run") as mock_run:
+            main()
+            mock_run.assert_called_once_with()
+
+    def test_mcp_help_exits_0(self, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["waggle", "mcp", "--help"])
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+        assert exc_info.value.code == 0
+
+
+class TestInstallSubcommand:
+    def test_install_calls_handle_install(self, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["waggle", "install"])
+        with patch("waggle.installer.handle_install") as mock_handler:
+            main()
+            mock_handler.assert_called_once()
+
+    def test_install_auq_order_forwarded(self, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["waggle", "install", "--auq-order", "last"])
+        with patch("waggle.installer.handle_install") as mock_handler:
+            main()
+            args = mock_handler.call_args[0][0]
+            assert args.auq_order == "last"
+
+    def test_install_help_exits_0(self, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["waggle", "install", "--help"])
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+        assert exc_info.value.code == 0

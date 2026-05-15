@@ -2,101 +2,57 @@
 
 ## Overview
 
-`spawn_worker` creates a new worker for a caller: checks concurrency limits, clones the repo if needed, creates a tmux session, launches claude, and records the worker in the database.
+`spawn_worker` creates a new tmux session, sets the required Waggle env vars, and launches `claude` inside it.
 
-Defined in `src/waggle/engine.py`. Delegates tmux operations to `src/waggle/tmux.py`.
+Implemented in `src/waggle/spawn.py` as `spawn_worker_impl()`. All tmux calls go through the `_tmux(argv)` seam.
 
 ## Parameters
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `caller_id` | `str` | Yes | — | Caller performing the spawn |
-| `model` | `str` | Yes | — | Claude model name (e.g. `"sonnet"`, `"haiku"`, `"opus"`) |
-| `repo` | `str` | Yes | — | Local path or GitHub HTTPS URL |
-| `session_name` | `str \| None` | No | `None` | tmux session name; generated as `waggle-{worker_id[:8]}` if omitted |
-| `command` | `str \| None` | No | `None` | Initial command (reserved — Epic 3 adds delivery) |
+| `model` | `str` | Yes | — | Claude model name (`"sonnet"`, `"haiku"`, `"opus"`) |
+| `repo` | `str` | Yes | — | Absolute local path to the working directory |
+| `session_name` | `str \| None` | No | `None` | tmux session name; generated as `waggle-{instance_id[:8]}` if omitted |
 
 ## Flow
 
-1. **Concurrency check** — count active workers (`status != 'done'`); reject if `>= max_workers`
-2. **Generate UUID** for `worker_id`
-3. **Generate session name** if not provided: `waggle-{worker_id[:8]}`
-4. **Clone/pull repo** if URL via `clone_or_update_repo()`
-5. **Create tmux session** via `create_session(session_name, local_repo, worker_id)` — sets `WAGGLE_WORKER_ID` env var
-6. **Launch claude** via `launch_agent_in_pane(session_id, model)` — runs `claude --model {model}`
-7. **Insert into workers table** (`status = 'working'`)
-8. **Return** `{worker_id, session_name}`
+1. **Generate UUID** for `instance_id`
+2. **Generate session name** if not provided: `waggle-{instance_id[:8]}`
+3. **Create tmux session** via `tmux new-session -d -s {session_name} -e KEY=val ...` — sets 7 required env vars including `WAGGLE_INSTANCE_ID`, `WAGGLE_MODEL`, `WAGGLE_REPO`, etc.
+4. **Launch claude** via `tmux send-keys -t {session_name}:0.0 "claude --model {model}" Enter`
+5. **Return** `{ok: true, instance_id, session_name}`
 
-## Claude Launch Command
+## Claude Status integration
 
-`launch_agent_in_pane` sends the following command to the tmux pane:
-
-```
-claude --model {model}
-```
-
-Workers are plain Claude Code sessions with no additional flags. Input delivery is handled via `tmux send-keys` (see `send_input.md`).
+Claude Status observes session lifecycle via hooks set by `waggle install`. Workers appear in `claude-status workers` output with the `waggle_owned=1` label.
 
 ## Errors
 
-| Error | Condition |
-|-------|-----------|
-| `concurrency_limit_reached` | Active worker count >= max_workers |
-| `repo_clone_failed` | git clone or fetch/reset failed |
-| `invalid_repo` | URL cannot be parsed (no owner/repo path components) |
-
-## Termination
-
-`terminate_worker` (also in `engine.py`) performs cleanup after killing the tmux session:
-
-1. **DB lookup + caller scope check** — find worker by `worker_id`; return `worker_not_found` if not present or caller doesn't own it
-2. **Kill tmux session** — `kill_session(session_id)` removes the tmux session
-3. **Delete worker row** — removes the row from the `workers` table
+| err_name | Condition |
+|----------|-----------|
+| `ErrTmuxNewSession` | `tmux new-session` exits non-zero |
+| `ErrTmuxSendKeys` | `tmux send-keys` exits non-zero (after session created) |
 
 ## Sequence Diagram
 
 ```mermaid
 sequenceDiagram
-    participant C as Caller
-    participant E as engine.py
-    participant TM as tmux.py
-    participant TX as tmux/libtmux
-    participant DB as SQLite DB
+    participant O as Orchestrator
+    participant S as spawn.py
+    participant TX as tmux
 
-    C->>E: spawn_worker(caller_id, model, repo, session_name?, command?)
+    O->>S: spawn_worker_impl(model, repo, session_name?)
 
-    Note over E: Step 1: Concurrency check
-    E->>DB: SELECT COUNT(*) FROM workers WHERE status != 'done'
-    alt count >= max_workers
-        E-->>C: {error: "concurrency_limit_reached"}
+    Note over S: Generate instance_id + session_name
+    S->>TX: new-session -d -s {session_name} -e WAGGLE_INSTANCE_ID=... ...
+    alt tmux error
+        S-->>O: {ok: false, err_name: "ErrTmuxNewSession"}
     end
 
-    Note over E: Steps 2-3: Generate IDs
-    E->>E: worker_id = uuid4()
-    E->>E: session_name = session_name or "waggle-{worker_id[:8]}"
-
-    Note over E: Step 4: Clone/pull repo
-    E->>TM: clone_or_update_repo_async(repo, repos_path)
-    alt clone/fetch fails
-        E-->>C: {error: "repo_clone_failed: ..."}
+    S->>TX: send-keys -t {session_name}:0.0 "claude --model {model}" Enter
+    alt tmux error
+        S-->>O: {ok: false, err_name: "ErrTmuxSendKeys"}
     end
 
-    Note over E: Step 5: Create tmux session
-    E->>TM: create_session(session_name, local_repo, worker_id)
-    TM->>TX: server.new_session(...)
-    TM->>TX: session.set_environment("WAGGLE_WORKER_ID", worker_id)
-    TX-->>TM: new session
-    TM-->>E: {status: "success", session_id, ...}
-
-    Note over E: Step 6: Launch claude
-    E->>TM: launch_agent_in_pane(session_id, model)
-    TM->>TX: pane.send_keys("claude --model {model}", enter=True)
-    TX-->>TM: ok
-    TM-->>E: {status: "success"}
-
-    Note over E: Step 7: DB insert
-    E->>DB: INSERT INTO workers (worker_id, caller_id, session_name, session_id, model, repo, status='working')
-    DB-->>E: ok
-
-    E-->>C: {worker_id, session_name}
+    S-->>O: {ok: true, instance_id, session_name}
 ```
