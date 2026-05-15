@@ -12,7 +12,14 @@ from waggle.sting import (
     _detect_mcp,
     _has_waggle_in_mcp_servers,
     _key_matches_waggle,
+    check_claude_status_health,
     handle_sting,
+)
+from tests.helpers import fake_claude_status
+from tests.sample_payloads import (
+    CAPABILITIES_V1,
+    CAPABILITIES_V2,
+    STDERR_ERR_STORE_UNAVAILABLE,
 )
 
 
@@ -66,22 +73,68 @@ class TestDetectMcp:
         assert _detect_mcp() is False
 
 
-class TestHandleSting:
-    def test_silent_when_detected(self, monkeypatch, capsys):
-        monkeypatch.setattr("waggle.sting._detect_mcp", lambda: True)
-        monkeypatch.setattr(sys, "argv", ["waggle", "sting"])
-        with pytest.raises(SystemExit) as exc:
-            handle_sting(None)
-        assert exc.value.code == 0
-        assert capsys.readouterr().out == ""
+class TestCheckClaudeStatusHealth:
+    """Tests for the new check_claude_status_health() function."""
 
-    def test_prints_reference_when_not_detected(self, monkeypatch, capsys):
-        monkeypatch.setattr("waggle.sting._detect_mcp", lambda: False)
-        monkeypatch.setattr(sys, "argv", ["waggle", "sting"])
-        with pytest.raises(SystemExit) as exc:
-            handle_sting(None)
+    def test_green_when_capabilities_v1(self):
+        import json
+        payload = json.dumps(CAPABILITIES_V1)
+        with fake_claude_status([(payload, "", 0)]):
+            healthy, msg = check_claude_status_health()
+        assert healthy is True
+        assert "OK" in msg
+
+    def test_green_message_includes_version(self):
+        import json
+        payload = json.dumps(CAPABILITIES_V1)
+        with fake_claude_status([(payload, "", 0)]):
+            healthy, msg = check_claude_status_health()
+        assert "1.0.0" in msg
+
+    def test_red_when_binary_missing(self):
+        with patch("waggle.claude_status._run", side_effect=FileNotFoundError):
+            healthy, msg = check_claude_status_health()
+        assert healthy is False
+        assert "PATH" in msg or "install" in msg.lower()
+
+    def test_red_when_contract_version_mismatch(self):
+        import json
+        payload = json.dumps(CAPABILITIES_V2)
+        with fake_claude_status([(payload, "", 0)]):
+            healthy, msg = check_claude_status_health()
+        assert healthy is False
+        assert "mismatch" in msg.lower() or "ErrContractVersionMismatch" in msg
+
+    def test_red_when_store_unavailable(self):
+        with fake_claude_status([("", STDERR_ERR_STORE_UNAVAILABLE, 1)]):
+            healthy, msg = check_claude_status_health()
+        assert healthy is False
+        assert "ErrStoreUnavailable" in msg or "unavailable" in msg.lower()
+
+
+class TestHandleSting:
+    def test_exits_0_when_healthy(self, capsys):
+        import json
+        payload = json.dumps(CAPABILITIES_V1)
+        with fake_claude_status([(payload, "", 0)]):
+            with pytest.raises(SystemExit) as exc:
+                handle_sting(None)
         assert exc.value.code == 0
-        assert "serve" in capsys.readouterr().out
+        assert capsys.readouterr().out.strip()  # some status output
+
+    def test_exits_1_when_binary_missing(self, capsys):
+        with patch("waggle.claude_status._run", side_effect=FileNotFoundError):
+            with pytest.raises(SystemExit) as exc:
+                handle_sting(None)
+        assert exc.value.code == 1
+
+    def test_exits_1_when_contract_mismatch(self, capsys):
+        import json
+        payload = json.dumps(CAPABILITIES_V2)
+        with fake_claude_status([(payload, "", 0)]):
+            with pytest.raises(SystemExit) as exc:
+                handle_sting(None)
+        assert exc.value.code == 1
 
 
 class TestCliReference:
