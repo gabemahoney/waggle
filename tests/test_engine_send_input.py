@@ -1,7 +1,7 @@
-"""Unit tests for waggle.spawn.send_input_impl (SR-3.4).
+"""Unit tests for claude_spawn.spawn.send_input_impl (SR-3.4).
 
 Tests that text is typed verbatim (no implicit Enter) to window 0, pane 0.
-All tmux calls go through the waggle.spawn._tmux seam.  No conftest.py.
+All tmux calls go through the claude_spawn.spawn._tmux seam.  No conftest.py.
 """
 
 from __future__ import annotations

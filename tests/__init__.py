@@ -1,1 +1,1 @@
-"""Test suite for Waggle."""
+"""Test suite for Claude Spawn."""

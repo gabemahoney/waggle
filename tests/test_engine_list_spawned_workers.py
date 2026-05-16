@@ -1,6 +1,6 @@
-"""Unit tests for waggle.spawn.list_spawned_workers_impl (SR-3.3).
+"""Unit tests for claude_spawn.spawn.list_spawned_workers_impl (SR-3.3).
 
-Uses fake_claude_status from tests.helpers to patch waggle.claude_status._run.
+Uses fake_claude_status from tests.helpers to patch claude_spawn.claude_status._run.
 No real subprocess is forked.  No conftest.py.
 """
 

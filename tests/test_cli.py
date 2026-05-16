@@ -16,7 +16,7 @@ class TestCLIHelp:
         assert exc_info.value.code == 0
 
     def test_no_subcommand_exits_0(self, monkeypatch, capsys):
-        monkeypatch.setattr(sys, "argv", ["waggle"])
+        monkeypatch.setattr(sys, "argv", ["claude-spawn"])
         with pytest.raises(SystemExit) as exc_info:
             main()
         assert exc_info.value.code == 0

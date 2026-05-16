@@ -1,7 +1,7 @@
 """Smoke tests guarding helpers.py import and shape invariants.
 
 Imports only from tests.helpers and tests.sample_payloads.
-No waggle.* production imports.
+No claude_spawn.* production imports.
 """
 
 import pytest
@@ -93,7 +93,7 @@ def test_fake_tmux_pane_single_line():
 
 
 # ---------------------------------------------------------------------------
-# fake_claude_status — test internal mechanics without touching waggle.*
+# fake_claude_status — test internal mechanics without touching claude_spawn.*
 # ---------------------------------------------------------------------------
 
 

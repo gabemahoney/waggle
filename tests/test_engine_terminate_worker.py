@@ -1,4 +1,4 @@
-"""Unit tests for waggle.spawn.terminate_worker_impl (SR-3.4).
+"""Unit tests for claude_spawn.spawn.terminate_worker_impl (SR-3.4).
 
 Tests that the correct session name is passed to kill-session and that an
 absent session returns operation-failed.  No conftest.py.
@@ -79,7 +79,7 @@ class TestTerminateWorker:
         assert result["err_name"] == "ErrTmuxKillFailed"
 
     def test_different_session_names(self):
-        for name in ["waggle-abc12345", "my-worker", "session-1"]:
+        for name in ["spawn-abc12345", "my-worker", "session-1"]:
             calls, p = _patch_tmux([_OK])
             try:
                 sp.terminate_worker_impl(name)

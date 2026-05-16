@@ -43,7 +43,7 @@ async def spawn_worker(
         model: Claude model name (e.g. "claude-sonnet-4-5").
         repo: Absolute path to the working repository.
         session_name: Optional tmux session name.
-            Defaults to ``waggle-<8-char instance prefix>``.
+            Defaults to ``spawn-<8-char instance prefix>``.
 
     Returns:
         ``{"instance_id": str, "session_name": str}`` on success or

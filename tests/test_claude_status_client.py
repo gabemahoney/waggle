@@ -1,4 +1,4 @@
-"""Unit tests for waggle.claude_status (SR-2.3, SR-7.1).
+"""Unit tests for claude_spawn.claude_status (SR-2.3, SR-7.1).
 
 Tests are split into two logical groups:
 - Verb-shape and capability-pin (success paths, argv construction, version pin)
@@ -346,4 +346,4 @@ def test_import_is_inert():
 
 
 def test_decide_not_exported():
-    assert not hasattr(cs, "decide"), "waggle.claude_status must not export 'decide'"
+    assert not hasattr(cs, "decide"), "claude_spawn.claude_status must not export 'decide'"

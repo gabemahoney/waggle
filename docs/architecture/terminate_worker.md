@@ -4,7 +4,7 @@
 
 `terminate_worker` kills a worker's tmux session via `tmux kill-session`.
 
-Implemented in `src/waggle/spawn.py` as `terminate_worker_impl()`. All tmux calls go through the `_tmux(argv)` seam.
+Implemented in `src/claude_spawn/spawn.py` as `terminate_worker_impl()`. All tmux calls go through the `_tmux(argv)` seam.
 
 ## Parameters
 

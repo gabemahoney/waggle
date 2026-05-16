@@ -9,7 +9,7 @@
 ## What Was Tested
 
 Validates the `notifications/claude/channel` MCP notification mechanism for delivering
-freeform input to workers — the waggle v2 replacement for `tmux send-keys`.
+freeform input to workers — the Claude Spawn v2 replacement for `tmux send-keys`.
 
 Three server-side requirements must hold:
 
@@ -22,7 +22,7 @@ Two distinct push paths were tested:
 - **Tool-triggered push (FastMCP)** — Claude calls a tool; the tool handler sends the
   notification in-band using the active request context (`ctx.session.send_notification`).
 - **Unsolicited push (low-level SDK)** — Server detects `InitializedNotification` and
-  immediately pushes a channel notification with no tool call. This is the waggle v2
+  immediately pushes a channel notification with no tool call. This is the Claude Spawn v2
   production path (`send_input`).
 
 ## How to Run
@@ -92,7 +92,7 @@ is enforced correctly.
 
 Within a FastMCP tool handler, `ctx.session.send_notification(notification)` sends the
 channel notification in-band. This is the simpler path but requires an active tool
-invocation — not suitable for waggle v2's `send_input` use case.
+invocation — not suitable for Claude Spawn v2's `send_input` use case.
 
 ### Unsolicited push requires the low-level SDK
 
@@ -138,7 +138,7 @@ validate the end-to-end injection path through `claude -p`.
 The critical result is `TestUnsolicitedChannelPush::test_unsolicited_push_with_channel_flag`:
 the sentinel appeared in Claude's output without any tool call, confirming that
 `--dangerously-load-development-channels` causes Claude to open a standalone GET /mcp
-SSE stream and receive server-pushed notifications. The waggle v2 `send_input`
+SSE stream and receive server-pushed notifications. The Claude Spawn v2 `send_input`
 mechanism is **cleared to proceed** as designed in SRD §4.
 
 ### Fallback (if unsolicited push fails)
@@ -146,9 +146,9 @@ mechanism is **cleared to proceed** as designed in SRD §4.
 If `TestUnsolicitedChannelPush` fails — meaning Claude does not open a GET /mcp SSE
 stream and the notification is silently dropped — the following alternatives exist:
 
-1. **Tool-triggered relay** — waggle wraps each input in a `send_input` tool call;
+1. **Tool-triggered relay** — Claude Spawn wraps each input in a `send_input` tool call;
    Claude invokes it to pull the next message. Adds one round-trip per injection.
-2. **`stdin` / `tmux send-keys`** — fall back to the existing mechanism waggle v2
+2. **`stdin` / `tmux send-keys`** — fall back to the existing mechanism Claude Spawn v2
    was designed to replace.
 3. **Filesystem polling** — worker polls a known file path; orchestrator writes to it.
 

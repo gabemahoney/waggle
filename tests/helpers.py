@@ -1,4 +1,4 @@
-"""Shared test helpers for the Waggle test suite (SR-11.2).
+"""Shared test helpers for the Claude Spawn test suite (SR-11.2).
 
 No conftest.py — helpers live in this plain importable module.
 No imports from claude_spawn.* production source except via the patch target.
@@ -106,7 +106,7 @@ def fake_worker_record(
     """Return a Worker record dict matching the claude-status contract 1.0.0.
 
     ``status`` must be one of the six documented values.
-    ``labels`` defaults to a minimal waggle-owned set when not supplied.
+    ``labels`` defaults to a minimal claude_spawn-owned set when not supplied.
     ``pending`` defaults to ``None``.
     """
     if status not in _VALID_STATUSES:

@@ -1,6 +1,6 @@
-"""Unit tests for waggle.installer (t1.fg8.pr).
+"""Unit tests for claude_spawn.installer (t1.fg8.pr).
 
-Tests the waggle install command:
+Tests the claude-spawn install command:
 - Missing claude-status exits non-zero with actionable message
 - Happy path invokes claude-status install-hooks with correct env and argv
 - --auq-order flag is forwarded
@@ -156,7 +156,7 @@ class TestAuqOrderForwarding:
         idx = captured_argv.index("--auq-order")
         assert captured_argv[idx + 1] == "last"
 
-    def test_auq_order_before_waggle(self):
+    def test_auq_order_before_claude_spawn(self):
         captured_argv = []
 
         def capture(argv, env):
@@ -166,11 +166,11 @@ class TestAuqOrderForwarding:
         with patch("shutil.which", side_effect=_mock_which):
             with patch("claude_spawn.installer._run_install_hooks", side_effect=capture):
                 with pytest.raises(SystemExit):
-                    ins.handle_install(_args(auq_order="before:waggle"))
+                    ins.handle_install(_args(auq_order="before:claude-spawn"))
 
         assert "--auq-order" in captured_argv
         idx = captured_argv.index("--auq-order")
-        assert captured_argv[idx + 1] == "before:waggle"
+        assert captured_argv[idx + 1] == "before:claude-spawn"
 
 
 # ---------------------------------------------------------------------------

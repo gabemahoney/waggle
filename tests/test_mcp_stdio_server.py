@@ -1,4 +1,4 @@
-"""Tests for the waggle stdio MCP server (t1.fg8.vv).
+"""Tests for the claude_spawn stdio MCP server (t1.fg8.vv).
 
 Verifies tool registration count, SR-7.1 error wrapping, and that no
 TCP/UDS socket is bound by the module.  No conftest.py.

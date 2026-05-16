@@ -1,6 +1,6 @@
 """Structural-invariants tests for tests/sample_payloads.py.
 
-Imports only from tests.sample_payloads; no waggle.* production imports.
+Imports only from tests.sample_payloads; no claude_spawn.* production imports.
 """
 
 import re

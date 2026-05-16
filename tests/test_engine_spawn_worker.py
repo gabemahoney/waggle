@@ -1,6 +1,6 @@
-"""Unit tests for waggle.spawn.spawn_worker_impl (SR-3.2).
+"""Unit tests for claude_spawn.spawn.spawn_worker_impl (SR-3.2).
 
-All tmux invocations are patched via waggle.spawn._tmux.
+All tmux invocations are patched via claude_spawn.spawn._tmux.
 No real tmux process is forked.  No conftest.py.
 """
 
@@ -21,7 +21,7 @@ _OK_TRIPLE = ("", "", 0)   # tmux exits 0 with no output
 
 
 def _patch_tmux(triples):
-    """Context manager: patch waggle.spawn._tmux to return canned triples."""
+    """Context manager: patch claude_spawn.spawn._tmux to return canned triples."""
     queue = list(triples)
     calls = []
 
@@ -61,7 +61,7 @@ class TestSpawnWorkerShape:
         # Must parse without raising
         uuid.UUID(result["instance_id"])
 
-    def test_default_session_name_starts_with_waggle(self):
+    def test_default_session_name_starts_with_spawn(self):
         calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
         try:
             result = sp.spawn_worker_impl("claude-sonnet-4-5", "/tmp/repo")

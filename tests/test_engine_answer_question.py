@@ -1,8 +1,8 @@
-"""Unit tests for waggle.spawn.answer_question_impl (SR-3.5).
+"""Unit tests for claude_spawn.spawn.answer_question_impl (SR-3.5).
 
 Covers: happy path, multi-question refusal, no-match refusal,
 question-not-visible refusal, whitespace normalization, Enter in send-keys.
-Uses fake_claude_status and waggle.spawn._tmux seam.  No conftest.py.
+Uses fake_claude_status and claude_spawn.spawn._tmux seam.  No conftest.py.
 """
 
 from __future__ import annotations

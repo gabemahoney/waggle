@@ -4,7 +4,7 @@
 
 `send_input` delivers freeform text to a running worker via `tmux send-keys`. No implicit Enter is appended — the caller controls when Enter is sent.
 
-Implemented in `src/waggle/spawn.py` as `send_input_impl()`. All tmux calls go through the `_tmux(argv)` seam.
+Implemented in `src/claude_spawn/spawn.py` as `send_input_impl()`. All tmux calls go through the `_tmux(argv)` seam.
 
 ## Parameters
 

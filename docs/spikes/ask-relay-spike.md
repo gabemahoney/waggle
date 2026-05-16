@@ -7,7 +7,7 @@
 ## What Was Tested
 
 Validates that Claude Code's `PreToolUse` hook supports `updatedInput.answers` in its
-stdout JSON for `AskUserQuestion` tool calls. This is the core mechanism waggle v2's
+stdout JSON for `AskUserQuestion` tool calls. This is the core mechanism Claude Spawn v2's
 Permission Relay needs to answer worker questions programmatically — without blocking
 at a TUI prompt.
 
@@ -92,7 +92,7 @@ spawn time.
 SRD §5.2. Unit tests confirm the JSON format is correct. The integration test design
 validates end-to-end delivery through the `claude -p` pipeline.
 
-Waggle v2's ask relay implementation is **cleared to proceed** using this mechanism:
+Claude Spawn v2's ask relay implementation is **cleared to proceed** using this mechanism:
 spawn-time hook injection via `--settings`, keyed by question text, returning the
 orchestrator-selected answer.
 

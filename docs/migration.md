@@ -1,50 +1,54 @@
 # Migration: Daemon → Stdio MCP
 
-This document walks an operator from a working old-Waggle installation (HTTP daemon + SQLite) to the new Waggle (stateless stdio MCP + Claude Status). There is **no in-place upgrade path** — this is a hard cutover.
+This document walks an operator from a working prior installation (HTTP daemon + SQLite) to Claude Spawn (stateless stdio MCP + Claude Status). There is **no in-place upgrade path** — this is a hard cutover.
 
 ## What changed
 
-| Old Waggle | New Waggle |
+| Prior distribution | Claude Spawn |
 |-----------|-----------|
 | HTTP daemon (uvicorn, Starlette) | stdio MCP subprocess |
 | SQLite state database | Claude Status (external CLI) |
-| `waggle serve` | `waggle mcp` |
-| `waggle set-state`, `waggle permission-request`, `waggle ask-relay` | Removed — Claude Status handles state |
+| daemon entry-point subcommand | `claude-spawn mcp` |
+| removed daemon-era subcommands for serve / state mutation / permission relay / question relay | Removed — Claude Status handles state |
 | `register_caller`, `list_workers`, `check_status`, `approve_permission` MCP tools | Removed — use `claude-status` CLI directly |
 | `spawn_worker`, `send_input`, `get_output`, `terminate_worker`, `answer_question` | Retained, redesigned |
 | `list_spawned_workers` (new) | Added |
 
 ## Step 1: Stop the old daemon
 
+Stop and disable the prior daemon's systemd user service. The unit name matches whatever the earlier distribution installed:
+
 ```bash
-systemctl --user stop waggle
-systemctl --user disable waggle
+systemctl --user stop <prior-unit>
+systemctl --user disable <prior-unit>
 ```
 
-Remove the service file:
+Remove the service file and reload the daemon:
 
 ```bash
-rm -f ~/.config/systemd/user/waggle.service
+rm -f <prior-unit-file>
 systemctl --user daemon-reload
 ```
 
-## Step 2: Remove old waggle hooks from Claude settings
+The daemon's user-mode systemd unit and its file path are specific to the earlier distribution — do not re-create them under any new name.
 
-Edit `~/.claude/settings.json` and remove all hook entries that reference `waggle set-state`, `waggle permission-request`, or `waggle ask-relay`. The new `waggle install` command will write the replacement hooks.
+## Step 2: Remove old daemon hooks from Claude settings
+
+Edit `~/.claude/settings.json` and remove all hook entries that reference the prior daemon's hooks (the earlier distribution installed hooks for state mutation, permission relay, and question relay). The new `claude-spawn install` command will write the replacement hooks.
 
 ## Step 3: Delete the old database
 
-The SQLite database is no longer used. You can delete it:
+The SQLite database is no longer used. Delete the daemon's state directory under `$HOME`:
 
 ```bash
-rm -rf ~/.waggle/
+rm -rf <daemon-state-dir>/
 ```
 
 ## Step 4: Install the new package
 
 ```bash
-cd /path/to/waggle   # your clone of this repo
-pip install .        # or: poetry install
+cd /path/to/claude-spawn  # your clone of this repo
+pip install .              # or: poetry install
 ```
 
 ## Step 5: Install Claude Status
@@ -60,19 +64,19 @@ claude-status capabilities
 ## Step 6: Wire hooks
 
 ```bash
-waggle install
+claude-spawn install
 ```
 
-This runs `claude-status install-hooks` with the relay and AUQ mode settings Waggle requires. Optionally pass `--auq-order` to control hook ordering:
+This runs `claude-status install-hooks` with the relay and AUQ mode settings Claude Spawn requires. Optionally pass `--auq-order` to control hook ordering:
 
 ```bash
-waggle install --auq-order before:other-hook
+claude-spawn install --auq-order before:other-hook
 ```
 
 Verify health:
 
 ```bash
-waggle sting
+claude-spawn sting
 ```
 
 ## Step 7: Register the new MCP server with Claude Code
@@ -80,13 +84,13 @@ waggle sting
 Remove the old HTTP transport registration first (if present):
 
 ```bash
-claude mcp remove waggle 2>/dev/null || true
+claude mcp remove claude-spawn 2>/dev/null || true
 ```
 
 Add the new stdio transport:
 
 ```bash
-claude mcp add --transport stdio waggle waggle mcp
+claude mcp add --transport stdio claude-spawn claude-spawn mcp
 ```
 
 Verify:
@@ -97,7 +101,7 @@ claude mcp list
 
 ## Step 8: Restart Claude Code
 
-Restart any Claude Code sessions that should use the new Waggle.
+Restart any Claude Code sessions that should use the new Claude Spawn.
 
 ## Step 9: Smoke test
 
@@ -124,6 +128,6 @@ There is no automated rollback. If you need to revert:
 
 1. Check out the previous release tag
 2. Re-install the old package
-3. Restore `~/.waggle/` from backup if needed
-4. Re-register `waggle serve` as a systemd user service
+3. Restore the daemon's state directory from backup if needed
+4. Re-register the prior daemon as a systemd user service
 5. Remove the new stdio MCP registration and re-add the HTTP one

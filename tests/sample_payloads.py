@@ -1,4 +1,4 @@
-"""Canonical constants for Waggle test fixtures.
+"""Canonical constants for Claude Spawn test fixtures.
 
 All values conform to the Claude Status consumer-CLI contract 1.0.0.
 No logic, no side effects, no external imports.

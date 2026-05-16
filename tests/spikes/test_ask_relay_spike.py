@@ -1,6 +1,6 @@
 """Spike test: validate PreToolUse hook on AskUserQuestion supports updatedInput.answers.
 
-This validates the core mechanism that waggle's Permission Relay depends on:
+This validates the core mechanism that Claude Spawn's Permission Relay depends on:
 a PreToolUse hook intercepts AskUserQuestion, prints hookSpecificOutput JSON to stdout
 with updatedInput.answers, and Claude Code injects that answer so the worker never
 blocks at a TUI prompt.

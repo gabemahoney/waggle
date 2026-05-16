@@ -1,4 +1,4 @@
-"""Unit tests for waggle.sting module."""
+"""Unit tests for claude_spawn.sting module."""
 import json
 import sys
 from pathlib import Path

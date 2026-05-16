@@ -1,4 +1,4 @@
-"""Tests for the waggle package entry point configuration."""
+"""Tests for the claude_spawn package entry point configuration."""
 
 import importlib.metadata
 import os

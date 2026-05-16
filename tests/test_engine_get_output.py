@@ -1,7 +1,7 @@
-"""Unit tests for waggle.spawn.get_output_impl (SR-3.4).
+"""Unit tests for claude_spawn.spawn.get_output_impl (SR-3.4).
 
 Tests window 0/pane 0 targeting, default scrollback, out-of-range refusal,
-and raw-text passthrough.  All tmux calls go through waggle.spawn._tmux.
+and raw-text passthrough.  All tmux calls go through claude_spawn.spawn._tmux.
 No conftest.py.
 """
 

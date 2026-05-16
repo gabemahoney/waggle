@@ -1,12 +1,12 @@
-# Waggle
+# Claude Spawn
 
 Stateless stdio MCP server for managing Claude Code worker agents in tmux sessions.
 
 ## Overview
 
-Waggle is a lightweight stdio MCP server. An orchestrator Claude adds Waggle as an MCP server, then uses the six Waggle tools to spawn, monitor, and control Claude Code worker agents running in tmux sessions.
+Claude Spawn is a lightweight stdio MCP server. An orchestrator Claude adds Claude Spawn as an MCP server, then uses the six Claude Spawn tools to spawn, monitor, and control Claude Code worker agents running in tmux sessions.
 
-Waggle delegates all state storage to [Claude Status](https://github.com/anthropics/claude-status), which it reads via the `claude-status` consumer CLI. Waggle itself holds no database and runs no background daemon.
+Claude Spawn delegates all state storage to [Claude Status](https://github.com/anthropics/claude-status), which it reads via the `claude-status` consumer CLI. Claude Spawn itself holds no database and runs no background daemon.
 
 ## Prerequisites
 
@@ -17,24 +17,24 @@ Waggle delegates all state storage to [Claude Status](https://github.com/anthrop
 ## Installation
 
 ```bash
-git clone https://github.com/gabemahoney/waggle.git
-cd waggle
+git clone https://github.com/gabemahoney/claude-spawn.git
+cd claude-spawn
 pip install .        # or: poetry install
-waggle install       # wires Claude Status hooks into ~/.claude/settings.json
+claude-spawn install # wires Claude Status hooks into ~/.claude/settings.json
 ```
 
-`waggle install` verifies that `claude-status` is available and runs `claude-status install-hooks` with the required relay and AUQ mode settings. Restart Claude Code after install.
+`claude-spawn install` verifies that `claude-status` is available and runs `claude-status install-hooks` with the required relay and AUQ mode settings. Restart Claude Code after install.
 
 Verify everything is wired correctly:
 
 ```bash
-waggle sting
+claude-spawn sting
 ```
 
-## Register Waggle as an MCP server
+## Register Claude Spawn as an MCP server
 
 ```bash
-claude mcp add --transport stdio waggle waggle mcp
+claude mcp add --transport stdio claude-spawn claude-spawn mcp
 ```
 
 Verify:
@@ -53,7 +53,7 @@ Spawn a new Claude Code worker in a tmux session.
 |-----------|------|----------|---------|-------------|
 | `model` | `str` | Yes | — | Claude model (`"sonnet"`, `"haiku"`, `"opus"`) |
 | `repo` | `str` | Yes | — | Absolute local path to the repo |
-| `session_name` | `str` | No | auto | tmux session name; auto-generated as `waggle-{id[:8]}` if omitted |
+| `session_name` | `str` | No | auto | tmux session name; auto-generated as `spawn-{id[:8]}` if omitted |
 
 Returns: `{"ok": true, "instance_id": str, "session_name": str}`
 
@@ -61,14 +61,14 @@ Returns: `{"ok": true, "instance_id": str, "session_name": str}`
 
 ### `list_spawned_workers`
 
-List all Waggle-managed workers visible via Claude Status.
+List all Claude Spawn-managed workers visible via Claude Status.
 
 Returns:
 ```json
 {
   "ok": true,
   "workers": [
-    {"instance_id": "...", "session_name": "waggle-abc12345"}
+    {"instance_id": "...", "session_name": "spawn-abc12345"}
   ]
 }
 ```
@@ -145,7 +145,7 @@ Every tool returns an `ok` boolean. On failure:
 
 ## State and permissions
 
-Waggle does not manage permissions or worker state directly. Use `claude-status` for that:
+Claude Spawn does not manage permissions or worker state directly. Use `claude-status` for that:
 
 ```bash
 # Read worker state
@@ -160,10 +160,10 @@ claude-status decide <instance_id> deny
 
 ## Architecture
 
-Waggle is three thin layers:
+Claude Spawn is three thin layers:
 
 1. **`mcp_stdio.py`** — FastMCP stdio server; wraps each tool with SR-7.1 error handling
-2. **`spawn.py`** — tool implementations; the only subprocess calls are to `tmux` (via `_tmux` seam) and `claude-status` (via `waggle.claude_status._run` seam)
+2. **`spawn.py`** — tool implementations; the only subprocess calls are to `tmux` (via `_tmux` seam) and `claude-status` (via `claude_spawn.claude_status._run` seam)
 3. **`claude_status.py`** — consumer CLI client for `claude-status workers/worker/capabilities`
 
 No HTTP, no SQLite, no background threads.
