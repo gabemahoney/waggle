@@ -11,7 +11,7 @@ import sys
 
 import pytest
 
-import waggle.spawn as sp
+import claude_spawn.spawn as sp
 from tests.helpers import fake_claude_status, fake_worker_record, fake_workers_response
 
 

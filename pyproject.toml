@@ -1,11 +1,11 @@
 [tool.poetry]
-name = "waggle"
+name = "claude-spawn"
 version = "0.1.0"
 description = "Stateless stdio MCP server for managing Claude Code worker agents in tmux sessions"
 authors = ["Gabe Mahoney"]
 license = "MIT"
 readme = "README.md"
-packages = [{include = "waggle", from = "src"}]
+packages = [{include = "claude_spawn", from = "src"}]
 
 [tool.poetry.dependencies]
 python = "^3.10"
@@ -20,7 +20,7 @@ pytest-asyncio = "^1.3.0"
 asyncio_mode = "auto"
 
 [tool.poetry.scripts]
-waggle = "waggle.cli:main"
+claude-spawn = "claude_spawn.cli:main"
 
 [build-system]
 requires = ["poetry-core"]

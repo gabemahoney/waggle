@@ -1,6 +1,6 @@
 """Claude Status consumer-CLI client (SR-2.2, SR-2.3, SR-7.1).
 
-This module is the *only* path through which Waggle interacts with Claude
+This module is the *only* path through which Claude Spawn interacts with Claude
 Status.  Every invocation spawns a fresh ``claude-status`` subprocess (no
 connection pooling, no retry).
 
@@ -37,7 +37,7 @@ Failure::
 - ``ErrStoreUnavailable``   — cannot open / read the Claude Status database
 - ``ErrPayloadMalformed``   — stored payload failed validation
 
-**Waggle-originated** (produced internally; never emitted by claude-status):
+**Claude Spawn-originated** (produced internally; never emitted by claude-status):
 
 - ``ErrMalformedErrorEnvelope``  — stderr did not match the documented grammar
 - ``ErrContractVersionMismatch`` — ``capabilities`` reported a contract major != 1
@@ -47,13 +47,13 @@ Failure::
 ## Subprocess seam
 
 The private function ``_run(argv)`` is the single subprocess invocation point.
-All tests patch ``waggle.claude_status._run`` to avoid forking real processes.
+All tests patch ``claude_spawn.claude_status._run`` to avoid forking real processes.
 The seam timeout is ``_TIMEOUT_SECONDS`` (10 s) and is documented here so
 downstream callers know the upper bound.
 
 ## Import inertia
 
-``import waggle.claude_status`` performs no subprocess fork, no PATH lookup,
+``import claude_spawn.claude_status`` performs no subprocess fork, no PATH lookup,
 and no file I/O.  The capability-pin enforcement (SR-2.2 startup check) is
 the responsibility of the MCP server layer (sibling Epic t1.fg8.vv); this
 module only provides the ``capabilities()`` verb function.
@@ -75,7 +75,7 @@ _TIMEOUT_SECONDS = 10
 _STDERR_RE = re.compile(r"^ERROR: ([A-Z][A-Za-z0-9]*): (.+)\n?$")
 
 # ---------------------------------------------------------------------------
-# Subprocess seam — patch target: waggle.claude_status._run
+# Subprocess seam — patch target: claude_spawn.claude_status._run
 # ---------------------------------------------------------------------------
 
 

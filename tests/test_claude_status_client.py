@@ -5,7 +5,7 @@ Tests are split into two logical groups:
 - Typed-error, malformed-stderr, timeout, and missing-binary (failure paths)
 
 All JSON payloads are sourced from tests.sample_payloads — no inline literals.
-No conftest.py.  No imports from waggle.* other than waggle.claude_status.
+No conftest.py.  No imports from claude_spawn.* other than claude_spawn.claude_status.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from unittest.mock import patch
 
 import pytest
 
-import waggle.claude_status as cs
+import claude_spawn.claude_status as cs
 from tests.helpers import fake_claude_status, fake_worker_record, fake_workers_response
 from tests.sample_payloads import (
     CAPABILITIES_V1,
@@ -269,7 +269,7 @@ def test_non_json_stdout_exit_0_is_payload_malformed():
 
 
 def test_missing_binary_returns_not_found():
-    with patch("waggle.claude_status._run", side_effect=FileNotFoundError):
+    with patch("claude_spawn.claude_status._run", side_effect=FileNotFoundError):
         result = cs.workers()
     assert result["ok"] is False
     assert result["err_name"] == "ErrClaudeStatusNotFound"
@@ -283,7 +283,7 @@ def test_missing_binary_one_invocation():
         call_count += 1
         raise FileNotFoundError
 
-    with patch("waggle.claude_status._run", side_effect=raise_fnf):
+    with patch("claude_spawn.claude_status._run", side_effect=raise_fnf):
         cs.workers()
     assert call_count == 1
 
@@ -295,7 +295,7 @@ def test_missing_binary_one_invocation():
 
 def test_timeout_returns_timeout_err():
     exc = subprocess.TimeoutExpired(cmd="claude-status", timeout=10)
-    with patch("waggle.claude_status._run", side_effect=exc):
+    with patch("claude_spawn.claude_status._run", side_effect=exc):
         result = cs.workers()
     assert result["ok"] is False
     assert result["err_name"] == "ErrClaudeStatusTimeout"
@@ -310,7 +310,7 @@ def test_timeout_one_invocation():
         call_count += 1
         raise exc
 
-    with patch("waggle.claude_status._run", side_effect=raise_timeout):
+    with patch("claude_spawn.claude_status._run", side_effect=raise_timeout):
         cs.workers()
     assert call_count == 1
 
@@ -329,7 +329,7 @@ def test_import_is_inert():
     patched version would raise immediately and the test would fail.
     """
     import importlib
-    import waggle.claude_status as _mod
+    import claude_spawn.claude_status as _mod
 
     with patch("subprocess.run", side_effect=AssertionError("subprocess.run called at import")) as mock_run:
         # reload() re-runs all module-level statements in the existing module

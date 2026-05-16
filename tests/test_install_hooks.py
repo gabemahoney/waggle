@@ -19,7 +19,7 @@ from unittest.mock import patch
 
 import pytest
 
-import waggle.installer as ins
+import claude_spawn.installer as ins
 
 
 # ---------------------------------------------------------------------------
@@ -57,7 +57,7 @@ class TestMissingBinary:
 
     def test_does_not_invoke_subprocess_when_binary_absent(self):
         with patch("shutil.which", return_value=None):
-            with patch("waggle.installer._run_install_hooks") as mock_run:
+            with patch("claude_spawn.installer._run_install_hooks") as mock_run:
                 with pytest.raises(SystemExit):
                     ins.handle_install(_args())
         mock_run.assert_not_called()
@@ -71,7 +71,7 @@ class TestMissingBinary:
 class TestHappyPath:
     def test_exits_0_on_success(self):
         with patch("shutil.which", side_effect=_mock_which):
-            with patch("waggle.installer._run_install_hooks", return_value=("OK\n", "", 0)):
+            with patch("claude_spawn.installer._run_install_hooks", return_value=("OK\n", "", 0)):
                 with pytest.raises(SystemExit) as exc:
                     ins.handle_install(_args())
         assert exc.value.code == 0
@@ -84,7 +84,7 @@ class TestHappyPath:
             return ("", "", 0)
 
         with patch("shutil.which", side_effect=_mock_which):
-            with patch("waggle.installer._run_install_hooks", side_effect=capture):
+            with patch("claude_spawn.installer._run_install_hooks", side_effect=capture):
                 with pytest.raises(SystemExit):
                     ins.handle_install(_args())
 
@@ -98,7 +98,7 @@ class TestHappyPath:
             return ("", "", 0)
 
         with patch("shutil.which", side_effect=_mock_which):
-            with patch("waggle.installer._run_install_hooks", side_effect=capture):
+            with patch("claude_spawn.installer._run_install_hooks", side_effect=capture):
                 with pytest.raises(SystemExit):
                     ins.handle_install(_args())
 
@@ -113,7 +113,7 @@ class TestHappyPath:
 
         with patch.dict(os.environ, {"MY_CUSTOM_VAR": "hello"}):
             with patch("shutil.which", side_effect=_mock_which):
-                with patch("waggle.installer._run_install_hooks", side_effect=capture):
+                with patch("claude_spawn.installer._run_install_hooks", side_effect=capture):
                     with pytest.raises(SystemExit):
                         ins.handle_install(_args())
 
@@ -127,7 +127,7 @@ class TestHappyPath:
             return ("", "", 0)
 
         with patch("shutil.which", side_effect=_mock_which):
-            with patch("waggle.installer._run_install_hooks", side_effect=capture):
+            with patch("claude_spawn.installer._run_install_hooks", side_effect=capture):
                 with pytest.raises(SystemExit):
                     ins.handle_install(_args())
 
@@ -148,7 +148,7 @@ class TestAuqOrderForwarding:
             return ("", "", 0)
 
         with patch("shutil.which", side_effect=_mock_which):
-            with patch("waggle.installer._run_install_hooks", side_effect=capture):
+            with patch("claude_spawn.installer._run_install_hooks", side_effect=capture):
                 with pytest.raises(SystemExit):
                     ins.handle_install(_args(auq_order="last"))
 
@@ -164,7 +164,7 @@ class TestAuqOrderForwarding:
             return ("", "", 0)
 
         with patch("shutil.which", side_effect=_mock_which):
-            with patch("waggle.installer._run_install_hooks", side_effect=capture):
+            with patch("claude_spawn.installer._run_install_hooks", side_effect=capture):
                 with pytest.raises(SystemExit):
                     ins.handle_install(_args(auq_order="before:waggle"))
 
@@ -181,7 +181,7 @@ class TestAuqOrderForwarding:
 class TestSubprocessFailure:
     def test_exits_nonzero_on_nonzero_rc(self):
         with patch("shutil.which", side_effect=_mock_which):
-            with patch("waggle.installer._run_install_hooks",
+            with patch("claude_spawn.installer._run_install_hooks",
                        return_value=("", "hook error", 1)):
                 with pytest.raises(SystemExit) as exc:
                     ins.handle_install(_args())
@@ -205,7 +205,7 @@ class TestLegacyTemplateRemoval:
         monkeypatch.chdir(tmp_path)
 
         with patch("shutil.which", side_effect=_mock_which):
-            with patch("waggle.installer._run_install_hooks", return_value=("", "", 0)):
+            with patch("claude_spawn.installer._run_install_hooks", return_value=("", "", 0)):
                 with pytest.raises(SystemExit):
                     ins.handle_install(_args())
 
@@ -215,7 +215,7 @@ class TestLegacyTemplateRemoval:
         monkeypatch.chdir(tmp_path)
 
         with patch("shutil.which", side_effect=_mock_which):
-            with patch("waggle.installer._run_install_hooks", return_value=("", "", 0)):
+            with patch("claude_spawn.installer._run_install_hooks", return_value=("", "", 0)):
                 with pytest.raises(SystemExit) as exc:
                     ins.handle_install(_args())
 

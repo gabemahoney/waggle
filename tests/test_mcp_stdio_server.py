@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 import pytest
 
-import waggle.mcp_stdio as ms
+import claude_spawn.mcp_stdio as ms
 from tests.helpers import fake_claude_status, fake_workers_response
 
 
@@ -56,7 +56,7 @@ class TestToolRegistration:
 class TestSpawnWorkerErrorWrapping:
     @pytest.mark.asyncio
     async def test_exception_becomes_operation_failed(self):
-        with patch("waggle.spawn.spawn_worker_impl", side_effect=RuntimeError("boom")):
+        with patch("claude_spawn.spawn.spawn_worker_impl", side_effect=RuntimeError("boom")):
             result = await ms.spawn_worker.fn("sonnet", "/tmp/repo")
         assert result["ok"] is False
         assert result["err_name"] == "ErrUnexpected"
@@ -64,14 +64,14 @@ class TestSpawnWorkerErrorWrapping:
 
     @pytest.mark.asyncio
     async def test_tmux_failure_propagates_as_operation_failed(self):
-        with patch("waggle.spawn._tmux", return_value=("", "session exists", 1)):
+        with patch("claude_spawn.spawn._tmux", return_value=("", "session exists", 1)):
             result = await ms.spawn_worker.fn("sonnet", "/tmp/repo")
         assert result.get("ok") is False
 
     @pytest.mark.asyncio
     async def test_success_returns_id_pair(self):
         with patch(
-            "waggle.spawn._tmux",
+            "claude_spawn.spawn._tmux",
             return_value=("", "", 0),
         ):
             result = await ms.spawn_worker.fn("sonnet", "/tmp/repo", "my-sess")
@@ -87,7 +87,7 @@ class TestSpawnWorkerErrorWrapping:
 class TestListSpawnedWorkersErrorWrapping:
     @pytest.mark.asyncio
     async def test_exception_becomes_operation_failed(self):
-        with patch("waggle.spawn.list_spawned_workers_impl", side_effect=RuntimeError("oops")):
+        with patch("claude_spawn.spawn.list_spawned_workers_impl", side_effect=RuntimeError("oops")):
             result = await ms.list_spawned_workers.fn()
         assert result["ok"] is False
         assert result["err_name"] == "ErrUnexpected"
@@ -120,6 +120,6 @@ def test_import_does_not_bind_socket():
     import socket
     with patch.object(socket.socket, "bind", side_effect=AssertionError("bound a socket at import")):
         import importlib
-        import waggle.mcp_stdio
-        importlib.reload(waggle.mcp_stdio)
+        import claude_spawn.mcp_stdio
+        importlib.reload(claude_spawn.mcp_stdio)
     # If we reach here, no socket was bound at module load.

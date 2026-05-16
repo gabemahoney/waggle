@@ -1,12 +1,11 @@
-"""Waggle stdio MCP server — the new stateless MCP surface.
+"""Claude Spawn stdio MCP server — stateless MCP surface.
 
 Exposes two tools over stdio transport (SR-1.1):
   - spawn_worker
   - list_spawned_workers
 
-The existing HTTP/TCP server (waggle.server) is left untouched.
 This module contains no module-level side effects; import is inert.
-The server is launched only when ``run()`` is called (from ``waggle mcp``).
+The server is launched only when ``run()`` is called (from ``claude-spawn mcp``).
 
 SR-7.1 error wrapping: every tool body is wrapped in a try/except that
 translates unexpected exceptions into an operation-failed dict so the LLM
@@ -17,7 +16,7 @@ from __future__ import annotations
 
 from fastmcp import FastMCP
 
-from waggle import spawn
+from claude_spawn import spawn
 
 mcp = FastMCP("waggle-stdio")
 
@@ -149,10 +148,10 @@ async def answer_question(question_id: int, answer: str) -> dict:
 
 @mcp.tool()
 async def list_spawned_workers() -> dict:
-    """List all Waggle-owned workers from Claude Status.
+    """List all Claude Spawn-owned workers from Claude Status.
 
     Reads from ``claude-status workers --label waggle_owned=1`` on every call;
-    no in-memory state.  Survives Waggle process restarts.
+    no in-memory state.  Survives Claude Spawn process restarts.
 
     Returns:
         ``{"workers": [{"instance_id": str, "session_name": str}, ...]}``

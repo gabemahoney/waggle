@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 import pytest
 
-import waggle.spawn as sp
+import claude_spawn.spawn as sp
 from tests.helpers import (
     fake_claude_status,
     fake_worker_record,
@@ -71,7 +71,7 @@ def _patch_tmux(triples):
             raise AssertionError(f"_tmux called unexpectedly: argv={argv!r}")
         return queue.pop(0)
 
-    patcher = patch("waggle.spawn._tmux", side_effect=side_effect)
+    patcher = patch("claude_spawn.spawn._tmux", side_effect=side_effect)
     patcher.start()
     return calls, patcher
 

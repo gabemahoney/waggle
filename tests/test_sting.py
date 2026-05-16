@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from waggle.sting import (
+from claude_spawn.sting import (
     _WAGGLE_PATTERN,
     _detect_mcp,
     _has_waggle_in_mcp_servers,
@@ -91,7 +91,7 @@ class TestCheckClaudeStatusHealth:
         assert "1.0.0" in msg
 
     def test_red_when_binary_missing(self):
-        with patch("waggle.claude_status._run", side_effect=FileNotFoundError):
+        with patch("claude_spawn.claude_status._run", side_effect=FileNotFoundError):
             healthy, msg = check_claude_status_health()
         assert healthy is False
         assert "PATH" in msg or "install" in msg.lower()
@@ -122,7 +122,7 @@ class TestHandleSting:
         assert capsys.readouterr().out.strip()  # some status output
 
     def test_exits_1_when_binary_missing(self, capsys):
-        with patch("waggle.claude_status._run", side_effect=FileNotFoundError):
+        with patch("claude_spawn.claude_status._run", side_effect=FileNotFoundError):
             with pytest.raises(SystemExit) as exc:
                 handle_sting(None)
         assert exc.value.code == 1

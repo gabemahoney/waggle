@@ -2,7 +2,7 @@
 
 This module is the implementation backing for the new stdio MCP tools.
 All tmux invocations go through the ``_tmux`` seam (patch target:
-``waggle.spawn._tmux``) so tests never fork real tmux processes.
+``claude_spawn.spawn._tmux``) so tests never fork real tmux processes.
 
 No module-level side effects.  Import is inert.
 """
@@ -13,10 +13,10 @@ import subprocess
 import sys
 import uuid
 
-from waggle import claude_status
+from claude_spawn import claude_status
 
 # ---------------------------------------------------------------------------
-# Subprocess seam — patch target: waggle.spawn._tmux
+# Subprocess seam — patch target: claude_spawn.spawn._tmux
 # ---------------------------------------------------------------------------
 
 _TMUX_TIMEOUT = 10
@@ -219,7 +219,7 @@ def answer_question_impl(question_id: int, answer: str) -> dict:
     """Answer the pending AskUserQuestion identified by *question_id*.
 
     Implementation order (SR-3.5):
-    1. Fetch waggle-owned workers via Claude Status.
+    1. Fetch Claude Spawn-owned workers via Claude Status.
     2. Find row with pending.kind=="ask_user_question" and
        pending.request_id==question_id.
     3. Refuse if questions list has length > 1 (ErrMultiQuestionUnsupported).
@@ -326,7 +326,7 @@ def answer_question_impl(question_id: int, answer: str) -> dict:
 
 
 def list_spawned_workers_impl() -> dict:
-    """Query Claude Status for waggle-owned workers and project to ID pairs.
+    """Query Claude Status for Claude Spawn-owned workers and project to ID pairs.
 
     Returns ``{"workers": [{instance_id, session_name}, ...]}`` on success or
     an SR-7.1 operation-failed dict on failure.  Skipped rows are logged to
@@ -348,7 +348,7 @@ def list_spawned_workers_impl() -> dict:
     for skipped in envelope.get("skipped", []):
         iid = skipped.get("instance_id", "<unknown>") if isinstance(skipped, dict) else repr(skipped)
         print(
-            f"waggle list_spawned_workers: skipped row instance_id={iid!r}",
+            f"list_spawned_workers: skipped row instance_id={iid!r}",
             file=sys.stderr,
         )
 

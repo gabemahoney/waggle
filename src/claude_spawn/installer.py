@@ -1,4 +1,4 @@
-"""waggle install — wire Claude Status hooks for Waggle (SR-5.1, SR-5.2).
+"""claude-spawn install — wire Claude Status hooks for Claude Spawn (SR-5.1, SR-5.2).
 
 Verifies ``claude-status`` is on PATH, then delegates hook installation to
 ``claude-status install-hooks`` with the required env vars.  Forwards the
@@ -18,7 +18,7 @@ from pathlib import Path
 
 
 # ---------------------------------------------------------------------------
-# Subprocess seam — patch target: waggle.installer._run_install_hooks
+# Subprocess seam — patch target: claude_spawn.installer._run_install_hooks
 # ---------------------------------------------------------------------------
 
 
@@ -42,7 +42,7 @@ def _run_install_hooks(argv: list[str], env: dict[str, str]) -> tuple[str, str, 
 
 
 def handle_install(args) -> None:
-    """Handle the ``waggle install`` CLI subcommand.
+    """Handle the ``claude-spawn install`` CLI subcommand.
 
     Exits 0 on success, exits 1 on failure with an actionable error message.
     """
@@ -50,7 +50,7 @@ def handle_install(args) -> None:
     if shutil.which("claude-status") is None:
         print(
             "ERROR: 'claude-status' not found on PATH.\n"
-            "Install claude-status first, then re-run 'waggle install'.\n"
+            "Install claude-status first, then re-run 'claude-spawn install'.\n"
             "See: https://github.com/anthropics/claude-status for installation instructions.",
             file=sys.stderr,
         )
@@ -77,7 +77,7 @@ def handle_install(args) -> None:
     if stdout.strip():
         print(stdout.strip())
 
-    # SR-5.2 — remove the old Waggle hook template file if present.
+    # SR-5.2 — remove the old Claude Spawn hook template file if present.
     _remove_legacy_hook_template()
 
     sys.exit(0)

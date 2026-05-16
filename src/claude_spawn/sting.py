@@ -1,4 +1,4 @@
-"""waggle sting — emits CLI reference in non-MCP sessions."""
+"""claude-spawn sting — emits CLI reference in non-MCP sessions."""
 
 import json
 import re
@@ -20,7 +20,7 @@ def _has_waggle_in_mcp_servers(mcp_servers: object) -> bool:
 
 
 def _detect_mcp() -> bool:
-    """Scan ~/.claude.json and ~/.claude/settings.json for waggle MCP entry."""
+    """Scan ~/.claude.json and ~/.claude/settings.json for claude-spawn MCP entry."""
     home = Path.home()
 
     # Location 1: ~/.claude.json top-level mcpServers
@@ -54,10 +54,10 @@ def check_claude_status_health() -> tuple[bool, str]:
       (b) The ``capabilities`` call succeeds (any other error → red)
       (c) ``contract_version`` major is 1 (ErrContractVersionMismatch → red)
 
-    Uses ``waggle.claude_status.capabilities()`` which handles (a) and (c)
+    Uses ``claude_spawn.claude_status.capabilities()`` which handles (a) and (c)
     automatically; a returned ``ok=True`` means all three conditions are met.
     """
-    from waggle import claude_status
+    from claude_spawn import claude_status
 
     result = claude_status.capabilities()
     if result["ok"]:
@@ -70,7 +70,7 @@ def check_claude_status_health() -> tuple[bool, str]:
     if err_name == "ErrClaudeStatusNotFound":
         return False, (
             "claude-status not found on PATH. "
-            "Install claude-status and run 'waggle install'."
+            "Install claude-status and run 'claude-spawn install'."
         )
     if err_name == "ErrContractVersionMismatch":
         return False, f"contract_version mismatch: {err_desc}"
@@ -78,7 +78,7 @@ def check_claude_status_health() -> tuple[bool, str]:
 
 
 def handle_sting(args):
-    """Handle the ``waggle sting`` command.
+    """Handle the ``claude-spawn sting`` command.
 
     Exits 0 (green) when claude-status is reachable and contract_version
     major is 1; exits 1 (red) with an actionable error message otherwise.

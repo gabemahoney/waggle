@@ -1,7 +1,7 @@
 """Shared test helpers for the Waggle test suite (SR-11.2).
 
 No conftest.py — helpers live in this plain importable module.
-No imports from waggle.* production source except via the patch target.
+No imports from claude_spawn.* production source except via the patch target.
 """
 
 from __future__ import annotations
@@ -12,10 +12,10 @@ from typing import Any
 from unittest.mock import patch
 
 # ---------------------------------------------------------------------------
-# fake_claude_status — patches waggle.claude_status._run
+# fake_claude_status — patches claude_spawn.claude_status._run
 # ---------------------------------------------------------------------------
 
-_SEAM = "waggle.claude_status._run"
+_SEAM = "claude_spawn.claude_status._run"
 
 
 class _FakeClaudeStatus:
@@ -27,7 +27,7 @@ class _FakeClaudeStatus:
             (stdout1, stderr1, exit_code1),
             (stdout2, stderr2, exit_code2),
         ]) as fcs:
-            # production code calls waggle.claude_status._run(argv)
+            # production code calls claude_spawn.claude_status._run(argv)
             assert fcs.calls[0] == ["workers", "--label", "waggle_owned=1"]
 
     Recorded invocations are in ``fcs.calls`` as a list of argv lists.
