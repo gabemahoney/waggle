@@ -67,7 +67,7 @@ class TestSpawnWorkerShape:
             result = sp.spawn_worker_impl("claude-sonnet-4-5", "/tmp/repo")
         finally:
             patcher.stop()
-        assert result["session_name"].startswith("waggle-")
+        assert result["session_name"].startswith("spawn-")
 
     def test_default_session_name_uses_first_8_chars_of_instance_id(self):
         calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
@@ -75,11 +75,11 @@ class TestSpawnWorkerShape:
             result = sp.spawn_worker_impl("claude-sonnet-4-5", "/tmp/repo")
         finally:
             patcher.stop()
-        # waggle-<first 8 chars of uuid (without dashes)>
+        # spawn-<first 8 chars of uuid (without dashes)>
         iid_nodashes = result["instance_id"].replace("-", "")
         expected_suffix = iid_nodashes[:8]
-        assert result["session_name"] == f"waggle-{expected_suffix}" or \
-               result["session_name"] == f"waggle-{result['instance_id'][:8]}"
+        assert result["session_name"] == f"spawn-{expected_suffix}" or \
+               result["session_name"] == f"spawn-{result['instance_id'][:8]}"
 
     def test_explicit_session_name_is_used(self):
         calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])

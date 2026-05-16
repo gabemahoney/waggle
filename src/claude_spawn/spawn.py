@@ -63,7 +63,7 @@ def spawn_worker_impl(
     """
     instance_id = str(uuid.uuid4())
     if session_name is None:
-        session_name = f"waggle-{instance_id[:8]}"
+        session_name = f"spawn-{instance_id[:8]}"
     model_lower = model.lower()
 
     # Build env-injection args for tmux new-session.
