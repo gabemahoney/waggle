@@ -8,15 +8,6 @@ from pathlib import Path
 # Matches "waggle", "waggle-mcp", "my_waggle", "WAGGLE" but NOT "wagglefish" or "mywaggle"
 _WAGGLE_PATTERN = re.compile(r"(?i)(?:^|[-_])waggle(?:$|[-_])")
 
-_CLI_REFERENCE = """\
-waggle is an HTTP daemon for managing Claude Code worker agents via tmux.
-All subcommands output JSON to stdout. Exit 0 on success, exit 1 on error, exit 2 on usage error.
-Run waggle <command> --help for full usage on any command.
-
-  serve                 Start the Waggle HTTP daemon (Uvicorn + FastMCP)
-  set-state             Update worker state from tmux pane content (used by hooks)
-  sting                 Emit this CLI reference if waggle MCP is not configured"""
-
 
 def _key_matches_waggle(key: str) -> bool:
     return bool(_WAGGLE_PATTERN.search(key))

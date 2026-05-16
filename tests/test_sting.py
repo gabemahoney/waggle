@@ -7,7 +7,6 @@ from unittest.mock import patch
 import pytest
 
 from waggle.sting import (
-    _CLI_REFERENCE,
     _WAGGLE_PATTERN,
     _detect_mcp,
     _has_waggle_in_mcp_servers,
@@ -136,8 +135,3 @@ class TestHandleSting:
                 handle_sting(None)
         assert exc.value.code == 1
 
-
-class TestCliReference:
-    def test_contains_all_subcommands(self):
-        for cmd in ["serve", "set-state", "sting"]:
-            assert cmd in _CLI_REFERENCE, f"_CLI_REFERENCE missing: {cmd}"
