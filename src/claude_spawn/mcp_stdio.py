@@ -18,7 +18,7 @@ from fastmcp import FastMCP
 
 from claude_spawn import spawn
 
-mcp = FastMCP("waggle-stdio")
+mcp = FastMCP("claude-spawn-stdio")
 
 
 def _err(operation: str, exc: Exception) -> dict:
@@ -150,7 +150,7 @@ async def answer_question(question_id: int, answer: str) -> dict:
 async def list_spawned_workers() -> dict:
     """List all Claude Spawn-owned workers from Claude Status.
 
-    Reads from ``claude-status workers --label waggle_owned=1`` on every call;
+    Reads from ``claude-status workers --label claude_spawn_owned=1`` on every call;
     no in-memory state.  Survives Claude Spawn process restarts.
 
     Returns:

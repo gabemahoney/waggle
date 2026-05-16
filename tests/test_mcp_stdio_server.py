@@ -47,6 +47,9 @@ class TestToolRegistration:
         overlap = forbidden & tools.keys()
         assert not overlap, f"old tools found in new server: {overlap}"
 
+    def test_server_name_is_claude_spawn_stdio(self):
+        assert ms.mcp.name == "claude-spawn-stdio"
+
 
 # ---------------------------------------------------------------------------
 # SR-7.1 error wrapping — spawn_worker
