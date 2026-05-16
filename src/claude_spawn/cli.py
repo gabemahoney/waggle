@@ -19,9 +19,9 @@ def main():
     # claude-spawn sting
     subparsers.add_parser(
         "sting",
-        help="Emit claude-spawn CLI reference if claude-spawn MCP is not configured",
+        help="Health-check the claude-status dependency",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        description="Exit silently if claude-spawn MCP is detected, otherwise print CLI reference"
+        description="Exit 0 if claude-status is reachable and its contract_version major is 1; exit 1 otherwise"
     )
 
     # claude-spawn mcp
