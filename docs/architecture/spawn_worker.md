@@ -18,7 +18,7 @@ Implemented in `src/claude_spawn/spawn.py` as `spawn_worker_impl()`. All tmux ca
 
 1. **Generate UUID** for `instance_id`
 2. **Generate session name** if not provided: `spawn-{instance_id[:8]}`
-3. **Create tmux session** via `tmux new-session -d -s {session_name} -e KEY=val ...` — sets 7 required env vars including `CLAUDE_SPAWN_INSTANCE_ID`, `CLAUDE_SPAWN_MODEL`, `CLAUDE_SPAWN_REPO`, etc.
+3. **Create tmux session** via `tmux new-session -d -s {session_name} -e KEY=val ...` — sets 7 required env vars: `CLAUDE_STATUS_INSTANCE_ID`, `CLAUDE_STATUS_RELAY_MODE`, `CLAUDE_STATUS_AUQ_MODE`, and four label vars `CLAUDE_STATUS_LABEL_CLAUDE_SPAWN_{OWNED,SESSION_NAME,MODEL,REPO}`.
 4. **Launch claude** via `tmux send-keys -t {session_name}:0.0 "claude --model {model}" Enter`
 5. **Return** `{ok: true, instance_id, session_name}`
 
@@ -44,7 +44,7 @@ sequenceDiagram
     O->>S: spawn_worker_impl(model, repo, session_name?)
 
     Note over S: Generate instance_id + session_name
-    S->>TX: new-session -d -s {session_name} -e CLAUDE_SPAWN_INSTANCE_ID=... ...
+    S->>TX: new-session -d -s {session_name} -e CLAUDE_STATUS_INSTANCE_ID=... ...
     alt tmux error
         S-->>O: {ok: false, err_name: "ErrTmuxNewSession"}
     end

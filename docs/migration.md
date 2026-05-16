@@ -30,7 +30,7 @@ rm -f <prior-unit-file>
 systemctl --user daemon-reload
 ```
 
-The daemon's user-mode systemd unit and its file path are specific to the earlier distribution — do not re-create them under any new name.
+These paths existed only under the earlier distribution; Claude Spawn does not install a systemd unit.
 
 ## Step 2: Remove old daemon hooks from Claude settings
 
@@ -38,10 +38,10 @@ Edit `~/.claude/settings.json` and remove all hook entries that reference the pr
 
 ## Step 3: Delete the old database
 
-The SQLite database is no longer used. Delete the daemon's state directory under `$HOME`:
+The SQLite database is no longer used. Delete the daemon's state directory under `$HOME`. Its name was the prior distribution's tool name prefixed with a dot — substitute that name below:
 
 ```bash
-rm -rf <daemon-state-dir>/
+rm -rf ~/.<prior-tool-name>/
 ```
 
 ## Step 4: Install the new package
