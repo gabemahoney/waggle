@@ -81,10 +81,10 @@ claude-spawn sting
 
 ## Step 7: Register the new MCP server with Claude Code
 
-Remove the old HTTP transport registration first (if present):
+If you had the prior distribution registered as an MCP server, remove that registration first. The registration name was whatever you chose when running `claude mcp add`; substitute it below:
 
 ```bash
-claude mcp remove claude-spawn 2>/dev/null || true
+claude mcp remove <prior-registration-name> 2>/dev/null || true
 ```
 
 Add the new stdio transport:
