@@ -7,10 +7,10 @@ from unittest.mock import patch
 import pytest
 
 from claude_spawn.sting import (
-    _WAGGLE_PATTERN,
+    _CLAUDE_SPAWN_PATTERN,
     _detect_mcp,
-    _has_waggle_in_mcp_servers,
-    _key_matches_waggle,
+    _has_claude_spawn_in_mcp_servers,
+    _key_matches_claude_spawn,
     check_claude_status_health,
     handle_sting,
 )
@@ -22,39 +22,40 @@ from tests.sample_payloads import (
 )
 
 
-class TestWagglePattern:
+class TestClaudeSpawnPattern:
     def test_pattern_matches_exact(self):
-        assert _WAGGLE_PATTERN.search("waggle")
+        assert _CLAUDE_SPAWN_PATTERN.search("claude-spawn")
+        assert _CLAUDE_SPAWN_PATTERN.search("claude_spawn")
 
     def test_pattern_matches_with_suffix(self):
-        assert _WAGGLE_PATTERN.search("waggle-mcp")
-        assert _WAGGLE_PATTERN.search("waggle_server")
+        assert _CLAUDE_SPAWN_PATTERN.search("claude_spawn_server")
 
     def test_pattern_matches_with_prefix(self):
-        assert _WAGGLE_PATTERN.search("my-waggle")
-        assert _WAGGLE_PATTERN.search("my_waggle")
+        assert _CLAUDE_SPAWN_PATTERN.search("my-claude-spawn")
 
     def test_pattern_no_match_embedded(self):
-        assert not _WAGGLE_PATTERN.search("wagglefish")
-        assert not _WAGGLE_PATTERN.search("mywaggle")
+        assert not _CLAUDE_SPAWN_PATTERN.search("claudespawn")
+        assert not _CLAUDE_SPAWN_PATTERN.search("myclaudespawn")
+        assert not _CLAUDE_SPAWN_PATTERN.search("claude-spawnfish")
+        assert not _CLAUDE_SPAWN_PATTERN.search("claude-spawned")
 
     def test_pattern_case_insensitive(self):
-        assert _WAGGLE_PATTERN.search("WAGGLE")
-        assert _WAGGLE_PATTERN.search("Waggle-Mcp")
+        assert _CLAUDE_SPAWN_PATTERN.search("CLAUDE-SPAWN")
+        assert _CLAUDE_SPAWN_PATTERN.search("Claude-Spawn")
 
 
 class TestDetectMcp:
     def test_detect_from_claude_json(self, tmp_path, monkeypatch):
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
         claude_json = tmp_path / ".claude.json"
-        claude_json.write_text(json.dumps({"mcpServers": {"waggle": {}}}))
+        claude_json.write_text(json.dumps({"mcpServers": {"claude-spawn": {}}}))
         assert _detect_mcp() is True
 
     def test_detect_from_settings_json(self, tmp_path, monkeypatch):
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
         settings = tmp_path / ".claude" / "settings.json"
         settings.parent.mkdir(parents=True)
-        settings.write_text(json.dumps({"mcpServers": {"waggle-server": {}}}))
+        settings.write_text(json.dumps({"mcpServers": {"claude-spawn-server": {}}}))
         assert _detect_mcp() is True
 
     def test_not_found_when_no_config(self, tmp_path, monkeypatch):
@@ -66,7 +67,7 @@ class TestDetectMcp:
         (tmp_path / ".claude.json").write_text("{not valid json")
         assert _detect_mcp() is False
 
-    def test_no_waggle_key_returns_false(self, tmp_path, monkeypatch):
+    def test_no_claude_spawn_key_returns_false(self, tmp_path, monkeypatch):
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
         (tmp_path / ".claude.json").write_text(json.dumps({"mcpServers": {"other-tool": {}}}))
         assert _detect_mcp() is False

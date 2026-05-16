@@ -5,18 +5,18 @@ import re
 import sys
 from pathlib import Path
 
-# Matches "waggle", "waggle-mcp", "my_waggle", "WAGGLE" but NOT "wagglefish" or "mywaggle"
-_WAGGLE_PATTERN = re.compile(r"(?i)(?:^|[-_])waggle(?:$|[-_])")
+# Matches "claude-spawn", "claude_spawn", "my-claude-spawn", "CLAUDE-SPAWN" but NOT "claudespawn" or "claude-spawnfish"
+_CLAUDE_SPAWN_PATTERN = re.compile(r"(?i)(?:^|[-_])claude[-_]spawn(?:$|[-_])")
 
 
-def _key_matches_waggle(key: str) -> bool:
-    return bool(_WAGGLE_PATTERN.search(key))
+def _key_matches_claude_spawn(key: str) -> bool:
+    return bool(_CLAUDE_SPAWN_PATTERN.search(key))
 
 
-def _has_waggle_in_mcp_servers(mcp_servers: object) -> bool:
+def _has_claude_spawn_in_mcp_servers(mcp_servers: object) -> bool:
     if not isinstance(mcp_servers, dict):
         return False
-    return any(_key_matches_waggle(k) for k in mcp_servers)
+    return any(_key_matches_claude_spawn(k) for k in mcp_servers)
 
 
 def _detect_mcp() -> bool:
@@ -27,7 +27,7 @@ def _detect_mcp() -> bool:
     claude_json = home / ".claude.json"
     try:
         data = json.loads(claude_json.read_text(encoding="utf-8"))
-        if _has_waggle_in_mcp_servers(data.get("mcpServers")):
+        if _has_claude_spawn_in_mcp_servers(data.get("mcpServers")):
             return True
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         pass
@@ -36,7 +36,7 @@ def _detect_mcp() -> bool:
     settings_json = home / ".claude" / "settings.json"
     try:
         data = json.loads(settings_json.read_text(encoding="utf-8"))
-        if _has_waggle_in_mcp_servers(data.get("mcpServers")):
+        if _has_claude_spawn_in_mcp_servers(data.get("mcpServers")):
             return True
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         pass
