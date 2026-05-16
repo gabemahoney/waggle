@@ -28,7 +28,7 @@ class _FakeClaudeStatus:
             (stdout2, stderr2, exit_code2),
         ]) as fcs:
             # production code calls claude_spawn.claude_status._run(argv)
-            assert fcs.calls[0] == ["workers", "--label", "waggle_owned=1"]
+            assert fcs.calls[0] == ["workers", "--label", "claude_spawn_owned=1"]
 
     Recorded invocations are in ``fcs.calls`` as a list of argv lists.
     Raises ``AssertionError`` if:
@@ -86,10 +86,10 @@ def fake_claude_status(triples: Sequence[tuple[str, str, int]]):
 # ---------------------------------------------------------------------------
 
 _DEFAULT_LABELS = {
-    "waggle_owned": "1",
-    "waggle_session_name": "worker-default",
-    "waggle_model": "claude-opus-4-5",
-    "waggle_repo": "/work/repo",
+    "claude_spawn_owned": "1",
+    "claude_spawn_session_name": "worker-default",
+    "claude_spawn_model": "claude-opus-4-5",
+    "claude_spawn_repo": "/work/repo",
 }
 
 _VALID_STATUSES = frozenset(

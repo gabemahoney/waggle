@@ -40,10 +40,10 @@ def _make_worker_with_pending(instance_id, request_id, questions, session_name="
         "tool_input": {"questions": questions},
     }
     labels = {
-        "waggle_owned": "1",
-        "waggle_session_name": session_name,
-        "waggle_model": "claude-sonnet-4-5",
-        "waggle_repo": "/work",
+        "claude_spawn_owned": "1",
+        "claude_spawn_session_name": session_name,
+        "claude_spawn_model": "claude-sonnet-4-5",
+        "claude_spawn_repo": "/work",
     }
     return fake_worker_record(instance_id, "ask_user", labels=labels, pending=pending)
 

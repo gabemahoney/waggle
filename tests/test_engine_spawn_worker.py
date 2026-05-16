@@ -148,25 +148,25 @@ class TestSpawnWorkerEnvVars:
         pairs = self._env_pairs(argv)
         assert pairs.get("CLAUDE_STATUS_AUQ_MODE") == "record"
 
-    def test_waggle_owned_label_1(self):
+    def test_claude_spawn_owned_label_1(self):
         argv = self._run_and_get_new_session_argv()
         pairs = self._env_pairs(argv)
-        assert pairs.get("CLAUDE_STATUS_LABEL_WAGGLE_OWNED") == "1"
+        assert pairs.get("CLAUDE_STATUS_LABEL_CLAUDE_SPAWN_OWNED") == "1"
 
-    def test_waggle_session_name_label(self):
+    def test_claude_spawn_session_name_label(self):
         argv = self._run_and_get_new_session_argv(sn="test-sess")
         pairs = self._env_pairs(argv)
-        assert pairs.get("CLAUDE_STATUS_LABEL_WAGGLE_SESSION_NAME") == "test-sess"
+        assert pairs.get("CLAUDE_STATUS_LABEL_CLAUDE_SPAWN_SESSION_NAME") == "test-sess"
 
-    def test_waggle_model_label_lowercased(self):
+    def test_claude_spawn_model_label_lowercased(self):
         argv = self._run_and_get_new_session_argv(model="Claude-Sonnet-4-5")
         pairs = self._env_pairs(argv)
-        assert pairs.get("CLAUDE_STATUS_LABEL_WAGGLE_MODEL") == "claude-sonnet-4-5"
+        assert pairs.get("CLAUDE_STATUS_LABEL_CLAUDE_SPAWN_MODEL") == "claude-sonnet-4-5"
 
-    def test_waggle_repo_label(self):
+    def test_claude_spawn_repo_label(self):
         argv = self._run_and_get_new_session_argv(repo="/srv/myrepo")
         pairs = self._env_pairs(argv)
-        assert pairs.get("CLAUDE_STATUS_LABEL_WAGGLE_REPO") == "/srv/myrepo"
+        assert pairs.get("CLAUDE_STATUS_LABEL_CLAUDE_SPAWN_REPO") == "/srv/myrepo"
 
     def test_all_seven_env_vars_present(self):
         argv = self._run_and_get_new_session_argv()

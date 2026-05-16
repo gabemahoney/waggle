@@ -55,22 +55,22 @@ class TestWorkersVerb:
     def test_with_label_argv(self):
         payload = json.dumps(_EMPTY_WORKERS)
         with fake_claude_status([(payload, "", 0)]) as fcs:
-            result = cs.workers(label="waggle_owned=1")
+            result = cs.workers(label="claude_spawn_owned=1")
         argv = fcs.calls[0]
         assert argv[0] == "workers"
         assert "--label" in argv
         idx = argv.index("--label")
-        assert argv[idx + 1] == "waggle_owned=1"
+        assert argv[idx + 1] == "claude_spawn_owned=1"
 
     def test_label_as_two_separate_entries(self):
         payload = json.dumps(_EMPTY_WORKERS)
         with fake_claude_status([(payload, "", 0)]) as fcs:
-            cs.workers(label="waggle_owned=1")
+            cs.workers(label="claude_spawn_owned=1")
         argv = fcs.calls[0]
         # --label and the value must be adjacent separate entries
         idx = argv.index("--label")
-        assert argv[idx + 1] == "waggle_owned=1"
-        assert "--label=waggle_owned=1" not in argv
+        assert argv[idx + 1] == "claude_spawn_owned=1"
+        assert "--label=claude_spawn_owned=1" not in argv
 
     def test_returns_operation_success(self):
         payload = json.dumps(_EMPTY_WORKERS)

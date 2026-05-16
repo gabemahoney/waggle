@@ -19,10 +19,10 @@ WORKER_WORKING = {
     "last_seen_at": "2026-05-14T10:05:00.000000000Z",
     "ended_at": None,
     "labels": {
-        "waggle_owned": "1",
-        "waggle_session_name": "worker-abc",
-        "waggle_model": "claude-opus-4-5",
-        "waggle_repo": "/work/repo",
+        "claude_spawn_owned": "1",
+        "claude_spawn_session_name": "worker-abc",
+        "claude_spawn_model": "claude-opus-4-5",
+        "claude_spawn_repo": "/work/repo",
     },
     "pending": None,
 }
@@ -37,10 +37,10 @@ WORKER_ASK_USER_SINGLE = {
     "last_seen_at": "2026-05-14T10:06:00.000000000Z",
     "ended_at": None,
     "labels": {
-        "waggle_owned": "1",
-        "waggle_session_name": "worker-def",
-        "waggle_model": "claude-opus-4-5",
-        "waggle_repo": "/work/repo",
+        "claude_spawn_owned": "1",
+        "claude_spawn_session_name": "worker-def",
+        "claude_spawn_model": "claude-opus-4-5",
+        "claude_spawn_repo": "/work/repo",
     },
     "pending": {
         "kind": "ask_user_question",
@@ -70,10 +70,10 @@ WORKER_ASK_USER_MULTI = {
     "last_seen_at": "2026-05-14T10:07:00.000000000Z",
     "ended_at": None,
     "labels": {
-        "waggle_owned": "1",
-        "waggle_session_name": "worker-ghi",
-        "waggle_model": "claude-opus-4-5",
-        "waggle_repo": "/work/repo",
+        "claude_spawn_owned": "1",
+        "claude_spawn_session_name": "worker-ghi",
+        "claude_spawn_model": "claude-opus-4-5",
+        "claude_spawn_repo": "/work/repo",
     },
     "pending": {
         "kind": "ask_user_question",
@@ -108,10 +108,10 @@ WORKER_ENDED = {
     "last_seen_at": "2026-05-14T09:30:00.000000000Z",
     "ended_at": "2026-05-14T09:30:00.000000000Z",
     "labels": {
-        "waggle_owned": "1",
-        "waggle_session_name": "worker-jkl",
-        "waggle_model": "claude-opus-4-5",
-        "waggle_repo": "/work/repo",
+        "claude_spawn_owned": "1",
+        "claude_spawn_session_name": "worker-jkl",
+        "claude_spawn_model": "claude-opus-4-5",
+        "claude_spawn_repo": "/work/repo",
     },
     "pending": None,
 }

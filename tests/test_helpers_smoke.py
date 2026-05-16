@@ -30,7 +30,7 @@ def test_fake_worker_record_basic_shape():
 
 def test_fake_worker_record_default_labels_keys():
     r = fake_worker_record("inst-abc", "waiting")
-    for key in ("waggle_owned", "waggle_session_name", "waggle_model", "waggle_repo"):
+    for key in ("claude_spawn_owned", "claude_spawn_session_name", "claude_spawn_model", "claude_spawn_repo"):
         assert key in r["labels"], f"default labels missing {key!r}"
 
 
@@ -142,7 +142,7 @@ def test_fake_claude_status_records_multiple_calls():
         ("out1", "", 0),
         ("out2", "err", 1),
     ])
-    fcs._side_effect(["workers", "--label", "waggle_owned=1"])
+    fcs._side_effect(["workers", "--label", "claude_spawn_owned=1"])
     fcs._side_effect(["worker", "inst-abc"])
-    assert fcs.calls[0] == ["workers", "--label", "waggle_owned=1"]
+    assert fcs.calls[0] == ["workers", "--label", "claude_spawn_owned=1"]
     assert fcs.calls[1] == ["worker", "inst-abc"]

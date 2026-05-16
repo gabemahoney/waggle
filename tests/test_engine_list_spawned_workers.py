@@ -30,7 +30,7 @@ def _make_response(*records):
 
 
 class TestListSpawnedWorkersArgv:
-    def test_passes_label_waggle_owned(self):
+    def test_passes_label_claude_spawn_owned(self):
         payload = _make_response()
         with fake_claude_status([(payload, "", 0)]) as fcs:
             sp.list_spawned_workers_impl()
@@ -38,7 +38,7 @@ class TestListSpawnedWorkersArgv:
         assert "workers" in argv
         assert "--label" in argv
         idx = argv.index("--label")
-        assert argv[idx + 1] == "waggle_owned=1"
+        assert argv[idx + 1] == "claude_spawn_owned=1"
 
     def test_exactly_one_seam_call(self):
         payload = _make_response()
@@ -63,7 +63,7 @@ class TestListSpawnedWorkersProjection:
 
     def test_projects_session_name_from_label(self):
         r = fake_worker_record("inst-bbb", "working")
-        r["labels"]["waggle_session_name"] = "my-session"
+        r["labels"]["claude_spawn_session_name"] = "my-session"
         payload = _make_response(r)
         with fake_claude_status([(payload, "", 0)]):
             result = sp.list_spawned_workers_impl()

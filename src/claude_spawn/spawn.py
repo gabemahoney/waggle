@@ -44,10 +44,10 @@ _REQUIRED_ENV_VARS = (
     "CLAUDE_STATUS_INSTANCE_ID",
     "CLAUDE_STATUS_RELAY_MODE",
     "CLAUDE_STATUS_AUQ_MODE",
-    "CLAUDE_STATUS_LABEL_WAGGLE_OWNED",
-    "CLAUDE_STATUS_LABEL_WAGGLE_SESSION_NAME",
-    "CLAUDE_STATUS_LABEL_WAGGLE_MODEL",
-    "CLAUDE_STATUS_LABEL_WAGGLE_REPO",
+    "CLAUDE_STATUS_LABEL_CLAUDE_SPAWN_OWNED",
+    "CLAUDE_STATUS_LABEL_CLAUDE_SPAWN_SESSION_NAME",
+    "CLAUDE_STATUS_LABEL_CLAUDE_SPAWN_MODEL",
+    "CLAUDE_STATUS_LABEL_CLAUDE_SPAWN_REPO",
 )
 
 
@@ -72,10 +72,10 @@ def spawn_worker_impl(
         ("CLAUDE_STATUS_INSTANCE_ID", instance_id),
         ("CLAUDE_STATUS_RELAY_MODE", "on"),
         ("CLAUDE_STATUS_AUQ_MODE", "record"),
-        ("CLAUDE_STATUS_LABEL_WAGGLE_OWNED", "1"),
-        ("CLAUDE_STATUS_LABEL_WAGGLE_SESSION_NAME", session_name),
-        ("CLAUDE_STATUS_LABEL_WAGGLE_MODEL", model_lower),
-        ("CLAUDE_STATUS_LABEL_WAGGLE_REPO", repo),
+        ("CLAUDE_STATUS_LABEL_CLAUDE_SPAWN_OWNED", "1"),
+        ("CLAUDE_STATUS_LABEL_CLAUDE_SPAWN_SESSION_NAME", session_name),
+        ("CLAUDE_STATUS_LABEL_CLAUDE_SPAWN_MODEL", model_lower),
+        ("CLAUDE_STATUS_LABEL_CLAUDE_SPAWN_REPO", repo),
     ]:
         env_args += ["-e", f"{key}={val}"]
 
@@ -231,7 +231,7 @@ def answer_question_impl(question_id: int, answer: str) -> dict:
     Never raises.
     """
     # Step 1: fetch workers
-    cs_result = claude_status.workers(label="waggle_owned=1")
+    cs_result = claude_status.workers(label="claude_spawn_owned=1")
     if not cs_result["ok"]:
         return {
             "ok": False,
@@ -278,7 +278,7 @@ def answer_question_impl(question_id: int, answer: str) -> dict:
 
     # Step 4: extract question text and session_name
     question_text = questions[0].get("question", "")
-    session_name = (matched.get("labels") or {}).get("waggle_session_name", "")
+    session_name = (matched.get("labels") or {}).get("claude_spawn_session_name", "")
 
     # Step 5: capture pane and verify question is visible
     stdout, stderr, rc = _tmux(
@@ -332,7 +332,7 @@ def list_spawned_workers_impl() -> dict:
     an SR-7.1 operation-failed dict on failure.  Skipped rows are logged to
     stderr but excluded from the returned list.  Never raises.
     """
-    result = claude_status.workers(label="waggle_owned=1")
+    result = claude_status.workers(label="claude_spawn_owned=1")
     if not result["ok"]:
         return result  # SR-7.1 failure from the client propagates unchanged
 
@@ -342,7 +342,7 @@ def list_spawned_workers_impl() -> dict:
         labels = rec.get("labels") or {}
         projected.append({
             "instance_id": rec["instance_id"],
-            "session_name": labels.get("waggle_session_name", ""),
+            "session_name": labels.get("claude_spawn_session_name", ""),
         })
 
     for skipped in envelope.get("skipped", []):
