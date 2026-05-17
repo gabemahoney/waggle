@@ -314,9 +314,13 @@ class TestOldSignatureRejection:
             "old positional shape must not produce a successful result"
         )
         assert result.get("ok") is False
-        # "opus" as cwd fails ErrCwdNotAPath (relative path / no leading slash)
+        # With template wiring, template="/tmp" is checked before cwd validation.
+        # Depending on whether the template directory exists, the impl returns
+        # ErrTemplateNotFound (loader fires first) or a cwd error.  All forms
+        # reject the old positional shape without producing a successful spawn.
         assert result.get("err_name") in (
             "ErrCwdNotAPath",
             "ErrCwdNotFound",
             "ErrCwdMissing",
+            "ErrTemplateNotFound",
         ), f"unexpected err_name: {result.get('err_name')!r}"

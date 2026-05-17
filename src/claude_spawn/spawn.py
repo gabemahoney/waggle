@@ -18,6 +18,7 @@ import tempfile
 import uuid
 
 from claude_spawn import claude_status
+from claude_spawn import templates as _templates_module
 
 # ---------------------------------------------------------------------------
 # Subprocess seam — patch target: claude_spawn.spawn._tmux
@@ -78,6 +79,79 @@ _THINKING_VALID = {"low", "medium", "high", "xhigh"}
 _RESERVED_ENV_KEYS = set(_REQUIRED_ENV_VARS) | {"CLAUDE_STATUS_LABEL_CLAUDE_SPAWN_MODEL"}
 
 
+def _merge_maps(per_call: dict | None, tmpl: dict | None) -> dict:
+    """SR-2.2 shallow map merge: union, per-call entries win on colliding top-level keys.
+
+    ``None`` per-call is treated as "not supplied" — the template value (or ``{}``) is
+    returned unchanged.  An explicit empty dict (``per_call={}``) enters the merge path:
+    template-only keys survive because there are no per-call entries to override them.
+    """
+    base = dict(tmpl) if tmpl else {}
+    if per_call is None:
+        return base
+    return {**base, **per_call}  # per-call wins on collisions
+
+
+def _resolve_options(
+    tmpl_opts: dict,
+    *,
+    cwd: str | None,
+    model: str | None,
+    thinking: str | None,
+    tmux_session_name: str | None,
+    instance_id: str | None,
+    claude_home: str | None,
+    claude_settings: str | None,
+    extra_env: dict | None,
+    claude_status_labels: dict | None,
+    claude_args: list | None,
+    permissions: dict | None,
+) -> dict:
+    """Apply SR-2.1 resolution chain (per-call → template → None).
+
+    SR-2.3: scalar and list fields use wholesale replacement — per-call non-``None``
+    value replaces the template value entirely.
+
+    SR-2.2: map fields (``extra_env``, ``claude_status_labels``, ``permissions``) use
+    shallow union merge — per-call entries win on colliding top-level keys while
+    independent template-only keys are preserved.  Map results are always ``dict``
+    (never ``None``).
+
+    Scalar results may still be ``None`` when neither source supplied a value; callers
+    apply SR-1.3 defaults afterward.  The list ``claude_args`` is ``None`` when absent
+    from both sources; callers default it to ``[]``.
+    """
+    def _scalar(name: str, per_call_val):
+        return per_call_val if per_call_val is not None else tmpl_opts.get(name)
+
+    resolved: dict = {
+        "cwd": _scalar("cwd", cwd),
+        "model": _scalar("model", model),
+        "thinking": _scalar("thinking", thinking),
+        "tmux_session_name": _scalar("tmux_session_name", tmux_session_name),
+        "instance_id": _scalar("instance_id", instance_id),
+        "claude_home": _scalar("claude_home", claude_home),
+        "claude_settings": _scalar("claude_settings", claude_settings),
+    }
+
+    # List (SR-2.3): per-call replaces wholesale; None → apply [] default later
+    if claude_args is not None:
+        resolved["claude_args"] = claude_args
+    elif "claude_args" in tmpl_opts:
+        resolved["claude_args"] = list(tmpl_opts["claude_args"])
+    else:
+        resolved["claude_args"] = None
+
+    # Maps (SR-2.2): shallow merge; always produces a dict
+    resolved["extra_env"] = _merge_maps(extra_env, tmpl_opts.get("extra_env"))
+    resolved["claude_status_labels"] = _merge_maps(
+        claude_status_labels, tmpl_opts.get("claude_status_labels")
+    )
+    resolved["permissions"] = _merge_maps(permissions, tmpl_opts.get("permissions"))
+
+    return resolved
+
+
 def _err_spawn(err_name: str, err_description: str) -> dict:
     return {
         "ok": False,
@@ -127,7 +201,7 @@ def _resolve_settings_path(
 
 
 def spawn_worker_impl(
-    cwd: str,
+    cwd: str | None = None,
     template: str | None = None,
     model: str | None = None,
     thinking: str | None = None,
@@ -144,19 +218,63 @@ def spawn_worker_impl(
 
     Returns ``{"instance_id": str, "tmux_session_name": str}`` on success or
     an SR-7.1 operation-failed dict on failure.  Never raises.
-    """
-    # --- SR-1.3 defaults for collection params ---
-    if extra_env is None:
-        extra_env = {}
-    if claude_status_labels is None:
-        claude_status_labels = {}
-    if claude_args is None:
-        claude_args = []
-    if permissions is None:
-        permissions = {}
 
-    # Track whether caller explicitly supplied instance_id (for collision check)
+    *template* names a TOML template to load from the templates directory.  When
+    supplied, its option-map is merged with the per-call arguments following the
+    SR-2.1 resolution chain:
+
+      1. Per-call value (any non-``None`` argument) — takes precedence.
+      2. Template value — used when the per-call argument is ``None``.
+      3. SR-1.3 default — used when neither source provides a value.
+
+    Map fields (``extra_env``, ``claude_status_labels``, ``permissions``):
+    SR-2.2 shallow merge — per-call entries win on colliding top-level keys;
+    independent keys from either source are preserved.  A non-``None`` but empty
+    per-call dict enters the merge path: template-only keys survive because there
+    are no per-call entries to override them.
+
+    Scalar and list fields (SR-2.3): per-call value replaces the template value
+    wholesale when per-call is not ``None``.
+    """
+    # Capture before resolution: collision check fires only for per-call-supplied
+    # instance_id, not one inherited from a template.
     caller_supplied_instance_id = instance_id is not None
+
+    # --- SR-6.6 fast path: skip loader entirely when template is not supplied ---
+    if template is not None:
+        load_result = _templates_module.load_template(template)
+        if not load_result["ok"]:
+            return load_result  # propagate ErrTemplateNotFound / ErrTemplateMalformed verbatim
+        tmpl_opts: dict = load_result["load_template"]
+    else:
+        tmpl_opts = {}
+
+    # --- SR-2.1 / SR-2.2 / SR-2.3 option resolution ---
+    resolved = _resolve_options(
+        tmpl_opts,
+        cwd=cwd,
+        model=model,
+        thinking=thinking,
+        tmux_session_name=tmux_session_name,
+        instance_id=instance_id,
+        claude_home=claude_home,
+        claude_settings=claude_settings,
+        extra_env=extra_env,
+        claude_status_labels=claude_status_labels,
+        claude_args=claude_args,
+        permissions=permissions,
+    )
+    cwd = resolved["cwd"]
+    model = resolved["model"]
+    thinking = resolved["thinking"]
+    tmux_session_name = resolved["tmux_session_name"]
+    instance_id = resolved["instance_id"]
+    claude_home = resolved["claude_home"]
+    claude_settings = resolved["claude_settings"]
+    extra_env = resolved["extra_env"]                          # dict, never None
+    claude_status_labels = resolved["claude_status_labels"]    # dict, never None
+    permissions = resolved["permissions"]                      # dict, never None
+    claude_args = resolved["claude_args"] if resolved["claude_args"] is not None else []
 
     # --- SR-9.1 validation (all checks before any tmux call) ---
 

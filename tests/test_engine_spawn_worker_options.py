@@ -19,12 +19,18 @@ import tempfile
 from unittest.mock import patch
 
 import pytest
+import tomli_w
 
 import claude_spawn.spawn as sp
 from tests.helpers import (
     fake_claude_status,
+    fake_templates_dir,
     fake_worker_record,
     fake_workers_response,
+)
+from tests.sample_payloads import (
+    TEMPLATE_TOML_MALFORMED_PARSE,
+    TEMPLATE_TOML_MINIMAL,
 )
 
 # ---------------------------------------------------------------------------
@@ -674,3 +680,286 @@ class TestValidationErrors:
             assert valid in desc, (
                 f"valid thinking value {valid!r} not mentioned in err_description: {desc!r}"
             )
+
+
+# ---------------------------------------------------------------------------
+# TestTemplateIntegration — SR-2.x, Epic 3 (12 cases)
+# ---------------------------------------------------------------------------
+
+
+class TestTemplateIntegration:
+    """12 template integration cases covering SR-2.x and Epic 3 ACs.
+
+    Every case uses fake_templates_dir (no real ~/.claude-spawn/templates/).
+    TOML inputs come from TEMPLATE_TOML_* constants or tomli_w.dumps().
+    """
+
+    # ------------------------------------------------------------------
+    # Case 1 — bare spawn must not touch the loader
+    # ------------------------------------------------------------------
+
+    def test_case_01_bare_spawn_no_read(self):
+        """spawn_worker_impl(cwd=...) with no template= must not call _read_template_file."""
+        with fake_templates_dir({"orch": TEMPLATE_TOML_MINIMAL}):
+            with patch("claude_spawn.templates._read_template_file") as mock_read:
+                calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
+                try:
+                    sp.spawn_worker_impl(cwd="/tmp")
+                finally:
+                    patcher.stop()
+                mock_read.assert_not_called()
+
+    # ------------------------------------------------------------------
+    # Case 2 — happy path: template options reflected in tmux calls
+    # ------------------------------------------------------------------
+
+    def test_case_02_happy_path_template_options_reflected(self):
+        """Template cwd, model, thinking, extra_env appear in tmux calls."""
+        tpl_data = {
+            "cwd": "/tmp",
+            "model": "opus",
+            "thinking": "high",
+            "extra_env": {"TPL_FOO": "tpl_bar"},
+        }
+        with fake_templates_dir({"orch": tomli_w.dumps(tpl_data)}):
+            calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
+            try:
+                result = sp.spawn_worker_impl(cwd=None, template="orch")
+            finally:
+                patcher.stop()
+        assert result.get("ok") is not False, f"spawn failed: {result}"
+        ns_pairs = _env_pairs(calls[0])
+        assert ns_pairs.get("CLAUDE_STATUS_LABEL_CLAUDE_SPAWN_MODEL") == "opus"
+        assert ns_pairs.get("TPL_FOO") == "tpl_bar"
+        cmd = " ".join(calls[1])
+        assert "--model opus" in cmd
+        assert "--effort high" in cmd
+
+    # ------------------------------------------------------------------
+    # Case 3 — per-call scalar overrides template scalar
+    # ------------------------------------------------------------------
+
+    def test_case_03_per_call_scalar_overrides_template_scalar(self):
+        """Per-call model=sonnet replaces template model=opus wholesale."""
+        tpl_data = {"cwd": "/tmp", "model": "opus"}
+        with fake_templates_dir({"orch": tomli_w.dumps(tpl_data)}):
+            calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
+            try:
+                result = sp.spawn_worker_impl(cwd="/tmp", template="orch", model="sonnet")
+            finally:
+                patcher.stop()
+        assert result.get("ok") is not False, f"spawn failed: {result}"
+        cmd = " ".join(calls[1])
+        assert "--model sonnet" in cmd
+        assert "--model opus" not in cmd
+
+    # ------------------------------------------------------------------
+    # Case 4 — extra_env map union with per-call wins on collision
+    # ------------------------------------------------------------------
+
+    def test_case_04_extra_env_map_union_per_call_wins_on_collision(self):
+        """extra_env: per-call BAR=3 wins; template FOO=1 preserved; per-call BAZ=4 added."""
+        tpl_data = {"cwd": "/tmp", "extra_env": {"FOO": "1", "BAR": "2"}}
+        with fake_templates_dir({"orch": tomli_w.dumps(tpl_data)}):
+            calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
+            try:
+                result = sp.spawn_worker_impl(
+                    cwd="/tmp", template="orch", extra_env={"BAR": "3", "BAZ": "4"}
+                )
+            finally:
+                patcher.stop()
+        assert result.get("ok") is not False, f"spawn failed: {result}"
+        pairs = _env_pairs(calls[0])
+        assert pairs.get("FOO") == "1", "template-only key FOO must be preserved"
+        assert pairs.get("BAR") == "3", "per-call BAR must win on collision"
+        assert pairs.get("BAZ") == "4", "per-call-only key BAZ must be present"
+
+    # ------------------------------------------------------------------
+    # Case 5 — claude_status_labels union with per-call wins on collision
+    # ------------------------------------------------------------------
+
+    def test_case_05_labels_map_union_per_call_wins_on_collision(self):
+        """claude_status_labels: per-call role=orch wins; template env=prod preserved."""
+        tpl_data = {
+            "cwd": "/tmp",
+            "claude_status_labels": {"role": "worker", "env": "prod"},
+        }
+        with fake_templates_dir({"orch": tomli_w.dumps(tpl_data)}):
+            calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
+            try:
+                result = sp.spawn_worker_impl(
+                    cwd="/tmp",
+                    template="orch",
+                    claude_status_labels={"role": "orch", "team": "alpha"},
+                )
+            finally:
+                patcher.stop()
+        assert result.get("ok") is not False, f"spawn failed: {result}"
+        pairs = _env_pairs(calls[0])
+        assert pairs.get("CLAUDE_STATUS_LABEL_ROLE") == "orch", "per-call role wins"
+        assert pairs.get("CLAUDE_STATUS_LABEL_ENV") == "prod", "template env preserved"
+        assert pairs.get("CLAUDE_STATUS_LABEL_TEAM") == "alpha", "per-call team present"
+
+    # ------------------------------------------------------------------
+    # Case 6 — permissions map merge: per-call replaces same-key, template
+    #           preserves different-key (BOTH halves asserted in one test)
+    # ------------------------------------------------------------------
+
+    def test_case_06_permissions_map_merge_dual_assertion(self):
+        """Per-call allow=['A'] replaces template allow=['B']; template deny=['D'] preserved."""
+        tpl_data = {
+            "cwd": "/tmp",
+            "permissions": {"allow": ["B"], "deny": ["D"]},
+        }
+        with fake_templates_dir({"orch": tomli_w.dumps(tpl_data)}):
+            calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
+            try:
+                result = sp.spawn_worker_impl(
+                    cwd="/tmp", template="orch", permissions={"allow": ["A"]}
+                )
+            finally:
+                patcher.stop()
+        assert result.get("ok") is not False, f"spawn failed: {result}"
+        settings_path = _extract_settings_path(calls[1])
+        assert settings_path is not None, "--settings must be present when permissions used"
+        with open(settings_path) as fh:
+            content = json.load(fh)
+        resolved_perms = content.get("permissions", {})
+        # Per-call allow replaces template allow wholesale
+        assert resolved_perms.get("allow") == ["A"], (
+            f"allow should be ['A'] (per-call wins), got {resolved_perms.get('allow')!r}"
+        )
+        # Template deny preserved (per-call did not supply deny)
+        assert resolved_perms.get("deny") == ["D"], (
+            f"deny should be ['D'] (template preserved), got {resolved_perms.get('deny')!r}"
+        )
+
+    # ------------------------------------------------------------------
+    # Case 7 — list replacement: per-call claude_args replaces template list
+    # ------------------------------------------------------------------
+
+    def test_case_07_list_replacement_claude_args(self):
+        """Per-call claude_args=['--c'] replaces template ['--a','--b'] wholesale."""
+        tpl_data = {"cwd": "/tmp", "claude_args": ["--a", "--b"]}
+        with fake_templates_dir({"orch": tomli_w.dumps(tpl_data)}):
+            calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
+            try:
+                result = sp.spawn_worker_impl(
+                    cwd="/tmp", template="orch", claude_args=["--c"]
+                )
+            finally:
+                patcher.stop()
+        assert result.get("ok") is not False, f"spawn failed: {result}"
+        cmd = " ".join(calls[1])
+        assert "--c" in cmd
+        assert "--a" not in cmd
+        assert "--b" not in cmd
+
+    # ------------------------------------------------------------------
+    # Case 8 — no caching: second call observes mutated file
+    # ------------------------------------------------------------------
+
+    def test_case_08_no_caching_second_call_sees_mutated_file(self):
+        """SR-6.6: each spawn_worker call re-reads the template file from disk."""
+        tpl_v1 = tomli_w.dumps({"cwd": "/tmp", "model": "opus"})
+        tpl_v2 = tomli_w.dumps({"cwd": "/tmp", "model": "sonnet"})
+        with fake_templates_dir({"orch": tpl_v1}) as tdir:
+            # First call — model from v1 template
+            calls1, patcher1 = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
+            try:
+                result1 = sp.spawn_worker_impl(cwd="/tmp", template="orch")
+            finally:
+                patcher1.stop()
+            assert result1.get("ok") is not False, f"first spawn failed: {result1}"
+            cmd1 = " ".join(calls1[1])
+            assert "--model opus" in cmd1, f"expected model=opus in first call: {cmd1!r}"
+
+            # Mutate the on-disk template file
+            with open(os.path.join(tdir, "orch.toml"), "w", encoding="utf-8") as fh:
+                fh.write(tpl_v2)
+
+            # Second call — must see new content (no caching)
+            calls2, patcher2 = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
+            try:
+                result2 = sp.spawn_worker_impl(cwd="/tmp", template="orch")
+            finally:
+                patcher2.stop()
+            assert result2.get("ok") is not False, f"second spawn failed: {result2}"
+            cmd2 = " ".join(calls2[1])
+            assert "--model sonnet" in cmd2, (
+                f"expected model=sonnet in second call (no caching): {cmd2!r}"
+            )
+
+    # ------------------------------------------------------------------
+    # Case 9 — required cwd satisfied by template
+    # ------------------------------------------------------------------
+
+    def test_case_09_required_cwd_satisfied_by_template(self):
+        """Template supplies cwd=/tmp; per-call omits cwd — spawn succeeds."""
+        with fake_templates_dir({"orch": TEMPLATE_TOML_MINIMAL}):
+            calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
+            try:
+                result = sp.spawn_worker_impl(cwd=None, template="orch")
+            finally:
+                patcher.stop()
+        assert result.get("err_name") is None, (
+            f"ErrCwdMissing must not fire when template provides cwd; got {result!r}"
+        )
+        assert result.get("ok") is not False, f"spawn must succeed; got {result!r}"
+
+    # ------------------------------------------------------------------
+    # Case 10 — required cwd NOT satisfied by either source
+    # ------------------------------------------------------------------
+
+    def test_case_10_required_cwd_not_satisfied_returns_err_cwd_missing(self):
+        """Neither template nor per-call supplies cwd — ErrCwdMissing returned."""
+        tpl_no_cwd = tomli_w.dumps({"model": "sonnet"})
+        calls, patcher = _patch_tmux([])
+        try:
+            with fake_templates_dir({"nocwd": tpl_no_cwd}):
+                result = sp.spawn_worker_impl(cwd=None, template="nocwd")
+        finally:
+            patcher.stop()
+        assert result.get("err_name") == "ErrCwdMissing", (
+            f"expected ErrCwdMissing when neither source provides cwd; got {result!r}"
+        )
+        assert len(calls) == 0, f"no tmux calls expected before validation error; got {calls}"
+
+    # ------------------------------------------------------------------
+    # Case 11 — missing template returns ErrTemplateNotFound
+    # ------------------------------------------------------------------
+
+    def test_case_11_missing_template_returns_err_template_not_found(self):
+        """ErrTemplateNotFound names both the template name and the templates directory."""
+        calls, patcher = _patch_tmux([])
+        try:
+            with fake_templates_dir({}) as tdir:
+                result = sp.spawn_worker_impl(cwd="/tmp", template="nope")
+        finally:
+            patcher.stop()
+        assert result.get("err_name") == "ErrTemplateNotFound", (
+            f"expected ErrTemplateNotFound; got {result!r}"
+        )
+        desc = result.get("err_description", "")
+        assert "nope" in desc, f"err_description must name template 'nope': {desc!r}"
+        assert tdir in desc, (
+            f"err_description must name templates directory {tdir!r}: {desc!r}"
+        )
+        assert len(calls) == 0, f"no tmux calls expected; got {calls}"
+
+    # ------------------------------------------------------------------
+    # Case 12 — malformed template surfaces ErrTemplateMalformed (not remapped)
+    # ------------------------------------------------------------------
+
+    def test_case_12_malformed_template_surfaces_err_template_malformed(self):
+        """ErrTemplateMalformed from the loader is returned verbatim, not remapped."""
+        calls, patcher = _patch_tmux([])
+        try:
+            with fake_templates_dir({"bad": TEMPLATE_TOML_MALFORMED_PARSE}):
+                result = sp.spawn_worker_impl(cwd="/tmp", template="bad")
+        finally:
+            patcher.stop()
+        assert result.get("err_name") == "ErrTemplateMalformed", (
+            f"expected ErrTemplateMalformed (not remapped to a per-call error); got {result!r}"
+        )
+        assert len(calls) == 0, f"no tmux calls expected; got {calls}"
