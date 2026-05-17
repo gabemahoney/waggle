@@ -24,6 +24,7 @@ _EXPECTED_TOOLS = {
     "spawn_worker",
     "list_spawned_workers",
     "list_templates",
+    "write_template",
     "send_input",
     "get_output",
     "terminate_worker",
@@ -32,9 +33,9 @@ _EXPECTED_TOOLS = {
 
 
 class TestToolRegistration:
-    def test_exactly_seven_tools_registered(self):
+    def test_exactly_eight_tools_registered(self):
         tools = ms.mcp._tool_manager._tools
-        assert len(tools) == 7, f"expected 7 tools, got {len(tools)}: {list(tools)}"
+        assert len(tools) == 8, f"expected 8 tools, got {len(tools)}: {list(tools)}"
 
     def test_all_expected_tools_registered(self):
         tools = ms.mcp._tool_manager._tools
@@ -134,6 +135,32 @@ class TestListTemplatesErrorWrapping:
         assert result["err_name"] == "ErrUnexpected"
         assert result["operation"] == "list_templates"
         assert "crash" in result["err_description"]
+
+
+# ---------------------------------------------------------------------------
+# SR-7.1 error wrapping — write_template
+# ---------------------------------------------------------------------------
+
+
+class TestWriteTemplateErrorWrapping:
+    @pytest.mark.asyncio
+    async def test_unexpected_exception_becomes_err_unexpected(self):
+        """Unexpected exception from impl → ok=False, ErrUnexpected, operation=write_template."""
+        with patch("claude_spawn.templates.write_template_impl", side_effect=RuntimeError("kaboom")):
+            result = await ms.write_template.fn(name="orch", options={"cwd": "/tmp"})
+        assert result["ok"] is False
+        assert result["err_name"] == "ErrUnexpected"
+        assert result["operation"] == "write_template"
+        assert "kaboom" in result["err_description"]
+
+    @pytest.mark.asyncio
+    async def test_known_error_propagates_unchanged(self):
+        """A known ErrTemplateNameUnsafe from impl propagates through the MCP tool unchanged."""
+        from tests.helpers import fake_templates_dir
+        with fake_templates_dir({}) as tdir:
+            result = await ms.write_template.fn(name="foo/bar", options={"cwd": "/tmp"})
+        assert result["ok"] is False
+        assert result["err_name"] == "ErrTemplateNameUnsafe"
 
 
 # ---------------------------------------------------------------------------

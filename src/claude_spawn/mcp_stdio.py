@@ -225,6 +225,34 @@ async def list_templates() -> dict:
         return _err("list_templates", exc)
 
 
+@mcp.tool()
+async def write_template(name: str, options: dict, force: bool = False) -> dict:
+    """Author or overwrite a Claude Spawn template file.
+
+    Args:
+        name: Template name (filename stem). Must not contain path
+            separators, leading dot, or "..".
+        options: Option map to serialize. Keys are SR-1.1 option
+            names; values follow the SR-6.4 schema.
+        force: If True, overwrite an existing template file
+            atomically. If False, return ErrTemplateExists on
+            collision.
+
+    Returns:
+        ``{"ok": True, "path": <abs path>, "options": <normalized options>}``
+        on success or an SR-7.1 operation-failed dict on failure.
+        Error names: ErrTemplateNameUnsafe, ErrTemplateOptionsInvalid,
+        ErrTemplateExists, or ErrUnexpected (via FastMCP wrapper).
+    """
+    import asyncio
+
+    try:
+        from claude_spawn import templates as templates_module
+        return await asyncio.to_thread(templates_module.write_template_impl, name, options, force)
+    except Exception as exc:
+        return _err("write_template", exc)
+
+
 def run() -> None:
     """Launch the stdio MCP server.  Blocks until stdin closes."""
     mcp.run()

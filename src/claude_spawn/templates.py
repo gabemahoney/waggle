@@ -53,7 +53,9 @@ are called only from the public functions, never at module level.
 from __future__ import annotations
 
 import os
+import tempfile
 import tomllib
+import tomli_w
 from collections.abc import Generator
 
 # ---------------------------------------------------------------------------
@@ -277,6 +279,128 @@ def enumerate_templates() -> Generator[tuple[str, str, dict], None, None]:
             "operation": "load_template",
             "load_template": data,
         }
+
+
+def write_template_impl(name: str, options: dict, force: bool = False) -> dict:
+    """Write a template file from an options dict (SR-7.3, SR-7.4).
+
+    Parameters
+    ----------
+    name:
+        Template name (filename stem).  Must not contain path separators,
+        leading dot, ``".."`` substring, or be empty.
+    options:
+        Option map to serialize.  Must pass SR-6.4 schema validation.
+    force:
+        If ``True``, overwrite an existing template atomically.  If
+        ``False``, return ``ErrTemplateExists`` on collision.
+
+    Returns
+    -------
+    ``{"ok": True, "path": <abs path>, "options": <options>}`` on success.
+
+    Error names
+    -----------
+    - ``ErrTemplateNameUnsafe`` — name fails SR-7.4 safety checks.
+    - ``ErrTemplateOptionsInvalid`` — options fail SR-6.4 schema validation.
+    - ``ErrTemplateExists`` — template already exists and *force* is False.
+    """
+    # ------------------------------------------------------------------
+    # 1. Name validation (SR-7.4)
+    # ------------------------------------------------------------------
+    def _name_unsafe(reason: str) -> dict:
+        return {
+            "ok": False,
+            "operation": "write_template",
+            "err_name": "ErrTemplateNameUnsafe",
+            "err_description": reason,
+        }
+
+    if name == "":
+        return _name_unsafe("name must not be empty")
+    if "/" in name:
+        return _name_unsafe("name must not contain '/'")
+    if "\\" in name:
+        return _name_unsafe("name must not contain '\\\\'")
+    if name == "." or name == "..":
+        return _name_unsafe(f"name must not be {name!r}")
+    if ".." in name:
+        return _name_unsafe("name must not contain '..' as a substring")
+    if name.startswith("."):
+        return _name_unsafe("name must not start with '.'")
+
+    # ------------------------------------------------------------------
+    # 2. Options validation (SR-6.4) — reuse _validate with pseudo-path
+    # ------------------------------------------------------------------
+    pseudo_path = f"<write_template:{name}>"
+    problem = _validate(pseudo_path, options)
+    if problem is not None:
+        return {
+            "ok": False,
+            "operation": "write_template",
+            "err_name": "ErrTemplateOptionsInvalid",
+            "err_description": problem,
+        }
+
+    # ------------------------------------------------------------------
+    # 3. Path resolution + defensive realpath check
+    # ------------------------------------------------------------------
+    tdir = _templates_dir()
+    path = os.path.join(tdir, f"{name}.toml")
+    parent = os.path.realpath(os.path.dirname(path))
+    expected = os.path.realpath(tdir)
+    if parent != expected:
+        return {
+            "ok": False,
+            "operation": "write_template",
+            "err_name": "ErrTemplateNameUnsafe",
+            "err_description": (
+                f"resolved parent {parent!r} does not match templates dir {expected!r}"
+            ),
+        }
+
+    # ------------------------------------------------------------------
+    # 4. Directory auto-creation
+    # ------------------------------------------------------------------
+    os.makedirs(tdir, exist_ok=True)
+
+    # ------------------------------------------------------------------
+    # 5. Collision handling
+    # ------------------------------------------------------------------
+    if os.path.exists(path) and not force:
+        return {
+            "ok": False,
+            "operation": "write_template",
+            "err_name": "ErrTemplateExists",
+            "err_description": (
+                f"template {name!r} already exists at {path!r}; pass force=True to overwrite"
+            ),
+        }
+
+    # ------------------------------------------------------------------
+    # 6. Atomic write via temp file + os.replace
+    # ------------------------------------------------------------------
+    tmp_path: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=tdir, delete=False, suffix=".toml.tmp"
+        ) as tmp_fh:
+            tmp_path = tmp_fh.name
+            tmp_fh.write(tomli_w.dumps(options).encode())
+        os.replace(tmp_path, path)
+        tmp_path = None  # rename succeeded; nothing to clean up
+    except Exception:
+        if tmp_path is not None:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+        raise
+
+    # ------------------------------------------------------------------
+    # 7. Success
+    # ------------------------------------------------------------------
+    return {"ok": True, "path": path, "options": options}
 
 
 def list_templates_impl() -> dict:
