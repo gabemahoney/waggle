@@ -37,7 +37,11 @@ calls go through the `_tmux(argv)` seam.
    is sent via `send-keys`.
 5. **Inject env vars** (SR-4.2) — six unconditional vars plus conditionals (see below).
 6. **Launch claude** via `tmux send-keys` with the SR-4.4 composed command line.
-7. **Return** `{"instance_id": str, "tmux_session_name": str}`.
+7. **Readiness wait** (SR-5) — poll `claude_status.workers(label="claude_spawn_owned=1")` every ~100 ms via the `_run` seam. Scan for `record["instance_id"] == <instance_id>` (exact match, SR-10.1). Each iteration also probes `tmux has-session -t <name>`:
+   - **Match found** → proceed to return.
+   - **Session gone** (non-zero `has-session`) → best-effort `tmux capture-pane` to collect diagnostic output → return `ErrSpawnWorkerExitedEarly` with pane text in `err_description`.
+   - **15-second timeout** (`_SPAWN_READINESS_TIMEOUT`) → best-effort `tmux kill-session -t <name>` → return `ErrSpawnReadinessTimeout`.
+8. **Return** `{"instance_id": str, "tmux_session_name": str}`.
 
 ### Environment variables (SR-4.2)
 
@@ -108,6 +112,8 @@ Workers appear in `claude-status workers` output with the `claude_spawn_owned=1`
 | `ErrThinkingInvalid` | `thinking` is not one of `low`, `medium`, `high`, `xhigh` |
 | `ErrTmuxSessionCreate` | `tmux new-session` exits non-zero |
 | `ErrTmuxSendKeys` | `tmux send-keys` exits non-zero (after session created) |
+| `ErrSpawnReadinessTimeout` | `spawn_worker` post-launch: 15 s elapsed with no Claude Status registration; `tmux kill-session` attempted (kill failure does not change the `err_name`) |
+| `ErrSpawnWorkerExitedEarly` | `spawn_worker` post-launch: `tmux has-session` probe returned non-zero before registration; `tmux capture-pane` output included in `err_description` |
 
 ## Sequence Diagram
 
@@ -116,6 +122,7 @@ sequenceDiagram
     participant O as Orchestrator
     participant S as spawn.py
     participant TX as tmux
+    participant CS as Claude Status
 
     O->>S: spawn_worker_impl(cwd, ...)
 
@@ -133,7 +140,25 @@ sequenceDiagram
         S-->>O: {ok: false, err_name: "ErrTmuxSendKeys"}
     end
 
-    S-->>O: {instance_id, tmux_session_name}
+    loop until match, early exit, or 15 s deadline (SR-5)
+        S->>CS: workers(label=claude_spawn_owned=1)
+        alt record["instance_id"] == instance_id
+            CS-->>S: match found
+            S-->>O: {instance_id, tmux_session_name}
+        else no match yet
+            CS-->>S: empty / no match
+        end
+        S->>TX: has-session -t <name>
+        alt session gone (rc != 0)
+            TX-->>S: non-zero
+            S->>TX: capture-pane -t <name> (best-effort)
+            S-->>O: {ok: false, err_name: "ErrSpawnWorkerExitedEarly"}
+        end
+    end
+    alt 15 s deadline elapsed
+        S->>TX: kill-session -t <name> (best-effort)
+        S-->>O: {ok: false, err_name: "ErrSpawnReadinessTimeout"}
+    end
 ```
 
 ## See also

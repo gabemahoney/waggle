@@ -99,6 +99,17 @@ The CLI `--settings <path>` overlay wins above all four layers. Claude Spawn opt
 
 Passing `--dangerously-skip-permissions` via `claude_args` alongside a non-empty `permissions` map is not an error; Claude Code's CLI-level bypass wins at runtime over the synthesized permissions overlay (SR-9.4).
 
+#### Readiness blocking
+
+`spawn_worker` blocks until the spawned worker registers with Claude Status. Once the call returns successfully, the returned `tmux_session_name` is immediately usable with `send_input`, `get_output`, `answer_question`, and `terminate_worker`.
+
+The default timeout is **15 seconds** (not configurable per-call or per-template in v1).
+
+**Timeout and early-exit errors:**
+
+- `ErrSpawnReadinessTimeout` — returned when 15 seconds elapse without the worker registering with Claude Status. The orphaned tmux session is automatically killed via `tmux kill-session`; no manual cleanup is needed.
+- `ErrSpawnWorkerExitedEarly` — returned when the worker's tmux session exits before registering. The error description includes captured pane output (`tmux capture-pane`) to aid diagnostics.
+
 #### Templates
 
 Option resolution follows a three-step chain: per-call argument → template field → SR-1.3 default. A template is consulted only when `template=<name>` is passed explicitly; a bare `spawn_worker(cwd=…)` call with no `template=` argument never reads the templates directory.
