@@ -6,11 +6,17 @@ No real tmux process is forked.  No conftest.py.
 
 from __future__ import annotations
 
+import json
 from unittest.mock import patch
 
 import pytest
 
 import claude_spawn.spawn as sp
+from tests.helpers import (
+    fake_claude_status,
+    fake_worker_record,
+    fake_workers_response,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -18,6 +24,9 @@ import claude_spawn.spawn as sp
 # ---------------------------------------------------------------------------
 
 _OK_TRIPLE = ("", "", 0)   # tmux exits 0 with no output
+
+# Fixed instance_id used in happy-path tests that need a known ID.
+_TEST_IID = "10000000-0000-4000-8000-000000000001"
 
 
 def _patch_tmux(triples):
@@ -36,6 +45,26 @@ def _patch_tmux(triples):
     return calls, patcher
 
 
+def _empty_workers_triple() -> tuple[str, str, int]:
+    """Success triple: empty workers list (no collision, not yet registered)."""
+    return (json.dumps({"workers": [], "skipped": []}), "", 0)
+
+
+def _readiness_triple(iid: str) -> tuple[str, str, int]:
+    """Success triple: workers list containing *iid* (readiness matched)."""
+    rec = fake_worker_record(instance_id=iid, status="working", cwd="/tmp")
+    return (json.dumps(fake_workers_response([rec])), "", 0)
+
+
+def _cs_happy_triples(iid: str) -> list[tuple[str, str, int]]:
+    """Two-triple list for happy-path tests that supply an explicit instance_id.
+
+    Triple 0: precheck — empty workers (no ErrInstanceIdCollision).
+    Triple 1: readiness poll — worker registered on the first poll.
+    """
+    return [_empty_workers_triple(), _readiness_triple(iid)]
+
+
 # ---------------------------------------------------------------------------
 # Return shape
 # ---------------------------------------------------------------------------
@@ -45,7 +74,8 @@ class TestSpawnWorkerShape:
     def test_returns_instance_id_and_tmux_session_name(self):
         calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
         try:
-            result = sp.spawn_worker_impl(cwd="/tmp")
+            with fake_claude_status(_cs_happy_triples(_TEST_IID)):
+                result = sp.spawn_worker_impl(cwd="/tmp", instance_id=_TEST_IID)
         finally:
             patcher.stop()
         assert "instance_id" in result
@@ -56,7 +86,8 @@ class TestSpawnWorkerShape:
         import uuid
         calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
         try:
-            result = sp.spawn_worker_impl(cwd="/tmp")
+            with fake_claude_status(_cs_happy_triples(_TEST_IID)):
+                result = sp.spawn_worker_impl(cwd="/tmp", instance_id=_TEST_IID)
         finally:
             patcher.stop()
         # Must parse without raising
@@ -66,7 +97,8 @@ class TestSpawnWorkerShape:
         """Default tmux_session_name is <sanitize(cwd)>-<instance_id[:8]>."""
         calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
         try:
-            result = sp.spawn_worker_impl(cwd="/tmp")
+            with fake_claude_status(_cs_happy_triples(_TEST_IID)):
+                result = sp.spawn_worker_impl(cwd="/tmp", instance_id=_TEST_IID)
         finally:
             patcher.stop()
         # With cwd="/tmp", sanitize → "tmp"
@@ -76,7 +108,8 @@ class TestSpawnWorkerShape:
         """tmux_session_name suffix is exactly instance_id[:8] (raw slice)."""
         calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
         try:
-            result = sp.spawn_worker_impl(cwd="/tmp")
+            with fake_claude_status(_cs_happy_triples(_TEST_IID)):
+                result = sp.spawn_worker_impl(cwd="/tmp", instance_id=_TEST_IID)
         finally:
             patcher.stop()
         iid = result["instance_id"]
@@ -86,7 +119,10 @@ class TestSpawnWorkerShape:
     def test_explicit_tmux_session_name_is_used(self):
         calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
         try:
-            result = sp.spawn_worker_impl(cwd="/tmp", tmux_session_name="my-session")
+            with fake_claude_status(_cs_happy_triples(_TEST_IID)):
+                result = sp.spawn_worker_impl(
+                    cwd="/tmp", tmux_session_name="my-session", instance_id=_TEST_IID
+                )
         finally:
             patcher.stop()
         assert result["tmux_session_name"] == "my-session"
@@ -101,7 +137,11 @@ class TestSpawnWorkerEnvVars:
     def _run_and_get_new_session_argv(self, model=None, repo="/tmp", sn=None):
         calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
         try:
-            sp.spawn_worker_impl(cwd=repo, model=model, tmux_session_name=sn)
+            with fake_claude_status(_cs_happy_triples(_TEST_IID)):
+                sp.spawn_worker_impl(
+                    cwd=repo, model=model, tmux_session_name=sn,
+                    instance_id=_TEST_IID,
+                )
         finally:
             patcher.stop()
         # First call is new-session
@@ -138,7 +178,7 @@ class TestSpawnWorkerEnvVars:
         argv = self._run_and_get_new_session_argv()
         pairs = self._env_pairs(argv)
         assert "CLAUDE_STATUS_INSTANCE_ID" in pairs
-        assert pairs["CLAUDE_STATUS_INSTANCE_ID"]  # non-empty UUID
+        assert pairs["CLAUDE_STATUS_INSTANCE_ID"]  # non-empty
 
     def test_relay_mode_on(self):
         argv = self._run_and_get_new_session_argv()
@@ -198,7 +238,8 @@ class TestSpawnWorkerLaunch:
     def test_send_keys_is_second_call(self):
         calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
         try:
-            sp.spawn_worker_impl(cwd="/tmp", tmux_session_name="s1")
+            with fake_claude_status(_cs_happy_triples(_TEST_IID)):
+                sp.spawn_worker_impl(cwd="/tmp", tmux_session_name="s1", instance_id=_TEST_IID)
         finally:
             patcher.stop()
         assert calls[1][0] == "send-keys"
@@ -206,7 +247,8 @@ class TestSpawnWorkerLaunch:
     def test_send_keys_targets_window_0_pane_0(self):
         calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
         try:
-            sp.spawn_worker_impl(cwd="/tmp", tmux_session_name="s1")
+            with fake_claude_status(_cs_happy_triples(_TEST_IID)):
+                sp.spawn_worker_impl(cwd="/tmp", tmux_session_name="s1", instance_id=_TEST_IID)
         finally:
             patcher.stop()
         argv = calls[1]
@@ -219,7 +261,11 @@ class TestSpawnWorkerLaunch:
         """--model flag appears in send-keys when model is supplied."""
         calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
         try:
-            sp.spawn_worker_impl(cwd="/tmp", model="opus", tmux_session_name="s1")
+            with fake_claude_status(_cs_happy_triples(_TEST_IID)):
+                sp.spawn_worker_impl(
+                    cwd="/tmp", model="opus", tmux_session_name="s1",
+                    instance_id=_TEST_IID,
+                )
         finally:
             patcher.stop()
         argv = calls[1]
@@ -231,7 +277,8 @@ class TestSpawnWorkerLaunch:
         """--model flag absent from send-keys when model is not supplied."""
         calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
         try:
-            sp.spawn_worker_impl(cwd="/tmp", tmux_session_name="s1")
+            with fake_claude_status(_cs_happy_triples(_TEST_IID)):
+                sp.spawn_worker_impl(cwd="/tmp", tmux_session_name="s1", instance_id=_TEST_IID)
         finally:
             patcher.stop()
         cmd_parts = " ".join(calls[1])
@@ -240,7 +287,8 @@ class TestSpawnWorkerLaunch:
     def test_send_keys_includes_enter(self):
         calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
         try:
-            sp.spawn_worker_impl(cwd="/tmp", tmux_session_name="s1")
+            with fake_claude_status(_cs_happy_triples(_TEST_IID)):
+                sp.spawn_worker_impl(cwd="/tmp", tmux_session_name="s1", instance_id=_TEST_IID)
         finally:
             patcher.stop()
         assert "Enter" in calls[1]
@@ -271,9 +319,11 @@ class TestSpawnWorkerErrors:
         assert result.get("err_name") == "ErrTmuxSendKeys"
 
     def test_exactly_two_tmux_calls_on_success(self):
+        """Worker found on first readiness poll → exactly 2 _tmux calls (new-session + send-keys)."""
         calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
         try:
-            sp.spawn_worker_impl(cwd="/tmp")
+            with fake_claude_status(_cs_happy_triples(_TEST_IID)):
+                sp.spawn_worker_impl(cwd="/tmp", instance_id=_TEST_IID)
         finally:
             patcher.stop()
         assert len(calls) == 2

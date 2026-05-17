@@ -73,11 +73,17 @@ class TestSpawnWorkerErrorWrapping:
 
     @pytest.mark.asyncio
     async def test_success_returns_id_pair(self):
-        with patch(
-            "claude_spawn.spawn._tmux",
-            return_value=("", "", 0),
-        ):
-            result = await ms.spawn_worker.fn(cwd="/tmp", tmux_session_name="my-sess")
+        import json
+        from tests.helpers import fake_worker_record, fake_workers_response
+        _IID = "mcp-test-iid-0000-4000-8000-000000000001"
+        rec = fake_worker_record(_IID, "working", cwd="/tmp")
+        precheck = (json.dumps(fake_workers_response([])), "", 0)
+        readiness = (json.dumps(fake_workers_response([rec])), "", 0)
+        with patch("claude_spawn.spawn._tmux", return_value=("", "", 0)):
+            with fake_claude_status([precheck, readiness]):
+                result = await ms.spawn_worker.fn(
+                    cwd="/tmp", tmux_session_name="my-sess", instance_id=_IID
+                )
         assert "instance_id" in result
         assert result["tmux_session_name"] == "my-sess"
 

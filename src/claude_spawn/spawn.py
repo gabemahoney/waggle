@@ -15,6 +15,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 
 from claude_spawn import claude_status
@@ -74,6 +75,9 @@ _REQUIRED_ENV_VARS = (
 )
 
 _THINKING_VALID = {"low", "medium", "high", "xhigh"}
+
+# SR-5.2: readiness polling timeout (seconds); not exposed as a caller param (SR-13)
+_SPAWN_READINESS_TIMEOUT = 15
 
 # Keys claude-spawn always emits itself (extra_env must not collide with these)
 _RESERVED_ENV_KEYS = set(_REQUIRED_ENV_VARS) | {"CLAUDE_STATUS_LABEL_CLAUDE_SPAWN_MODEL"}
@@ -422,7 +426,52 @@ def spawn_worker_impl(
             "err_description": stderr2.strip() or "tmux send-keys failed",
         }
 
-    return {"instance_id": instance_id, "tmux_session_name": tmux_session_name}
+    # --- SR-5: readiness polling loop ---
+    # Poll Claude Status until the spawned instance_id appears in the workers list,
+    # or until the deadline expires.  Interleave tmux has-session probes to detect
+    # early worker exit.  On cs failure, treat as a missed poll and retry until
+    # timeout rather than short-circuiting — cs may be transiently unavailable.
+    deadline = time.monotonic() + _SPAWN_READINESS_TIMEOUT
+    poll_interval = 0.1  # seconds (~100 ms per SR-5 latency target)
+
+    while time.monotonic() < deadline:
+        # SR-5 / SR-10.1: match solely on instance_id
+        cs_result = claude_status.workers(label="claude_spawn_owned=1")
+        if cs_result.get("ok") is not False:
+            for rec in cs_result["workers"].get("workers", []):
+                if rec.get("instance_id") == instance_id:
+                    return {"instance_id": instance_id, "tmux_session_name": tmux_session_name}
+
+        # SR-5.4: detect worker exited before registering
+        _stdout_hs, _stderr_hs, rc_hs = _tmux(["has-session", "-t", tmux_session_name])
+        if rc_hs != 0:
+            # Session is gone — best-effort pane capture for diagnostics
+            try:
+                cap_stdout, _cap_stderr, cap_rc = _tmux(
+                    ["capture-pane", "-p", "-t", f"{tmux_session_name}:0.0", "-S", "-100"]
+                )
+                captured = cap_stdout if cap_rc == 0 else ""
+            except Exception:
+                captured = ""
+            return _err_spawn(
+                "ErrSpawnWorkerExitedEarly",
+                f"worker {tmux_session_name!r} exited before registering with Claude Status."
+                f" captured pane:\n{captured}",
+            )
+
+        time.sleep(poll_interval)
+
+    # SR-5.3: timeout — best-effort kill; kill failure must NOT change err_name
+    try:
+        _tmux(["kill-session", "-t", tmux_session_name])
+    except Exception:
+        pass
+
+    return _err_spawn(
+        "ErrSpawnReadinessTimeout",
+        f"worker {tmux_session_name!r} did not register with Claude Status"
+        f" within {_SPAWN_READINESS_TIMEOUT}s",
+    )
 
 
 # ---------------------------------------------------------------------------

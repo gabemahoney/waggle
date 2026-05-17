@@ -39,6 +39,10 @@ from tests.sample_payloads import (
 
 _OK_TRIPLE = ("", "", 0)
 
+# Fixed instance_id for happy-path tests that need a known ID for the
+# readiness-loop match and the ErrInstanceIdCollision precheck.
+_TEST_IID = "20000000-0000-4000-8000-000000000002"
+
 
 def _empty_workers_triple() -> tuple[str, str, int]:
     """Canned claude-status triple: success with an empty workers list."""
@@ -50,6 +54,16 @@ def _workers_triple_with(records: list[dict]) -> tuple[str, str, int]:
     """Canned claude-status triple: success with a non-empty workers list."""
     payload = json.dumps(fake_workers_response(records))
     return (payload, "", 0)
+
+
+def _cs_happy_triples(iid: str, cwd: str = "/tmp") -> list[tuple[str, str, int]]:
+    """Two-triple list for happy-path tests that supply an explicit instance_id.
+
+    Triple 0: precheck — empty workers (no ErrInstanceIdCollision).
+    Triple 1: readiness poll — worker registered on the first poll.
+    """
+    rec = fake_worker_record(instance_id=iid, status="working", cwd=cwd)
+    return [_empty_workers_triple(), _workers_triple_with([rec])]
 
 
 def _patch_tmux(triples: list[tuple[str, str, int]]):
@@ -141,7 +155,7 @@ class TestDefaultTmuxSessionName:
         cwd = "/tmp"
         calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
         try:
-            with fake_claude_status([_empty_workers_triple()]):
+            with fake_claude_status(_cs_happy_triples(fixed_iid, cwd)):
                 result = sp.spawn_worker_impl(cwd=cwd, instance_id=fixed_iid)
         finally:
             patcher.stop()
@@ -152,9 +166,10 @@ class TestDefaultTmuxSessionName:
         """SR-3.4: instance_id shorter than 8 chars — full string is the suffix."""
         short_iid = "abc"
         cwd = "/tmp"
+        rec = fake_worker_record(instance_id=short_iid, status="working", cwd=cwd)
         calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
         try:
-            with fake_claude_status([_empty_workers_triple()]):
+            with fake_claude_status([_empty_workers_triple(), _workers_triple_with([rec])]):
                 result = sp.spawn_worker_impl(cwd=cwd, instance_id=short_iid)
         finally:
             patcher.stop()
@@ -171,19 +186,28 @@ class TestLaunchComposition:
     """tmux new-session and send-keys composition for every option category."""
 
     def _run(self, **kwargs) -> tuple[list[list[str]], dict]:
-        """Call spawn_worker_impl with patched seams; return (tmux_calls, result)."""
+        """Call spawn_worker_impl with patched seams; return (tmux_calls, result).
+
+        Always injects a fixed instance_id so the ErrInstanceIdCollision precheck
+        fires (and passes) and the readiness loop finds the worker on the first poll.
+        """
+        kwargs.setdefault("instance_id", _TEST_IID)
+        iid = kwargs["instance_id"]
+        cwd = kwargs.get("cwd", "/tmp")
         calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
         try:
-            result = sp.spawn_worker_impl(**kwargs)
+            with fake_claude_status(_cs_happy_triples(iid, cwd)):
+                result = sp.spawn_worker_impl(**kwargs)
         finally:
             patcher.stop()
         return calls, result
 
     def _run_with_supplied_id(self, instance_id: str = "testid12-0000-0000-0000-000000000000", **kwargs):
-        """Like _run, but supply instance_id so collision check fires once."""
+        """Like _run, but supply instance_id explicitly (collision check fires + readiness)."""
+        cwd = kwargs.get("cwd", "/tmp")
         calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
         try:
-            with fake_claude_status([_empty_workers_triple()]):
+            with fake_claude_status(_cs_happy_triples(instance_id, cwd)):
                 result = sp.spawn_worker_impl(instance_id=instance_id, **kwargs)
         finally:
             patcher.stop()
@@ -341,9 +365,10 @@ class TestLaunchComposition:
 
     def test_full_option_invocation(self):
         """A single invocation with every option exercised."""
+        _IID = "abc123de-0000-0000-0000-000000000000"
         calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
         try:
-            with fake_claude_status([_empty_workers_triple()]):
+            with fake_claude_status(_cs_happy_triples(_IID, "/tmp")):
                 result = sp.spawn_worker_impl(
                     cwd="/tmp",
                     model="opus",
@@ -351,7 +376,7 @@ class TestLaunchComposition:
                     extra_env={"FOO": "bar"},
                     claude_status_labels={"role": "orch"},
                     tmux_session_name="full-test-sess",
-                    instance_id="abc123de-0000-0000-0000-000000000000",
+                    instance_id=_IID,
                 )
         finally:
             patcher.stop()
@@ -393,9 +418,13 @@ class TestSettingsOverlay:
     """Settings-overlay synthesis: four primary cases."""
 
     def _run(self, **kwargs) -> tuple[list[list[str]], dict]:
+        kwargs.setdefault("instance_id", _TEST_IID)
+        iid = kwargs["instance_id"]
+        cwd = kwargs.get("cwd", "/tmp")
         calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
         try:
-            result = sp.spawn_worker_impl(**kwargs)
+            with fake_claude_status(_cs_happy_triples(iid, cwd)):
+                result = sp.spawn_worker_impl(**kwargs)
         finally:
             patcher.stop()
         return calls, result
@@ -704,7 +733,8 @@ class TestTemplateIntegration:
             with patch("claude_spawn.templates._read_template_file") as mock_read:
                 calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
                 try:
-                    sp.spawn_worker_impl(cwd="/tmp")
+                    with fake_claude_status(_cs_happy_triples(_TEST_IID)):
+                        sp.spawn_worker_impl(cwd="/tmp", instance_id=_TEST_IID)
                 finally:
                     patcher.stop()
                 mock_read.assert_not_called()
@@ -724,7 +754,8 @@ class TestTemplateIntegration:
         with fake_templates_dir({"orch": tomli_w.dumps(tpl_data)}):
             calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
             try:
-                result = sp.spawn_worker_impl(cwd=None, template="orch")
+                with fake_claude_status(_cs_happy_triples(_TEST_IID)):
+                    result = sp.spawn_worker_impl(cwd=None, template="orch", instance_id=_TEST_IID)
             finally:
                 patcher.stop()
         assert result.get("ok") is not False, f"spawn failed: {result}"
@@ -745,7 +776,10 @@ class TestTemplateIntegration:
         with fake_templates_dir({"orch": tomli_w.dumps(tpl_data)}):
             calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
             try:
-                result = sp.spawn_worker_impl(cwd="/tmp", template="orch", model="sonnet")
+                with fake_claude_status(_cs_happy_triples(_TEST_IID)):
+                    result = sp.spawn_worker_impl(
+                        cwd="/tmp", template="orch", model="sonnet", instance_id=_TEST_IID
+                    )
             finally:
                 patcher.stop()
         assert result.get("ok") is not False, f"spawn failed: {result}"
@@ -763,9 +797,12 @@ class TestTemplateIntegration:
         with fake_templates_dir({"orch": tomli_w.dumps(tpl_data)}):
             calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
             try:
-                result = sp.spawn_worker_impl(
-                    cwd="/tmp", template="orch", extra_env={"BAR": "3", "BAZ": "4"}
-                )
+                with fake_claude_status(_cs_happy_triples(_TEST_IID)):
+                    result = sp.spawn_worker_impl(
+                        cwd="/tmp", template="orch",
+                        extra_env={"BAR": "3", "BAZ": "4"},
+                        instance_id=_TEST_IID,
+                    )
             finally:
                 patcher.stop()
         assert result.get("ok") is not False, f"spawn failed: {result}"
@@ -787,11 +824,13 @@ class TestTemplateIntegration:
         with fake_templates_dir({"orch": tomli_w.dumps(tpl_data)}):
             calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
             try:
-                result = sp.spawn_worker_impl(
-                    cwd="/tmp",
-                    template="orch",
-                    claude_status_labels={"role": "orch", "team": "alpha"},
-                )
+                with fake_claude_status(_cs_happy_triples(_TEST_IID)):
+                    result = sp.spawn_worker_impl(
+                        cwd="/tmp",
+                        template="orch",
+                        claude_status_labels={"role": "orch", "team": "alpha"},
+                        instance_id=_TEST_IID,
+                    )
             finally:
                 patcher.stop()
         assert result.get("ok") is not False, f"spawn failed: {result}"
@@ -814,9 +853,12 @@ class TestTemplateIntegration:
         with fake_templates_dir({"orch": tomli_w.dumps(tpl_data)}):
             calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
             try:
-                result = sp.spawn_worker_impl(
-                    cwd="/tmp", template="orch", permissions={"allow": ["A"]}
-                )
+                with fake_claude_status(_cs_happy_triples(_TEST_IID)):
+                    result = sp.spawn_worker_impl(
+                        cwd="/tmp", template="orch",
+                        permissions={"allow": ["A"]},
+                        instance_id=_TEST_IID,
+                    )
             finally:
                 patcher.stop()
         assert result.get("ok") is not False, f"spawn failed: {result}"
@@ -844,9 +886,12 @@ class TestTemplateIntegration:
         with fake_templates_dir({"orch": tomli_w.dumps(tpl_data)}):
             calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
             try:
-                result = sp.spawn_worker_impl(
-                    cwd="/tmp", template="orch", claude_args=["--c"]
-                )
+                with fake_claude_status(_cs_happy_triples(_TEST_IID)):
+                    result = sp.spawn_worker_impl(
+                        cwd="/tmp", template="orch",
+                        claude_args=["--c"],
+                        instance_id=_TEST_IID,
+                    )
             finally:
                 patcher.stop()
         assert result.get("ok") is not False, f"spawn failed: {result}"
@@ -861,13 +906,18 @@ class TestTemplateIntegration:
 
     def test_case_08_no_caching_second_call_sees_mutated_file(self):
         """SR-6.6: each spawn_worker call re-reads the template file from disk."""
+        _IID1 = "case8-call1-0000-4000-8000-000000000001"
+        _IID2 = "case8-call2-0000-4000-8000-000000000002"
         tpl_v1 = tomli_w.dumps({"cwd": "/tmp", "model": "opus"})
         tpl_v2 = tomli_w.dumps({"cwd": "/tmp", "model": "sonnet"})
         with fake_templates_dir({"orch": tpl_v1}) as tdir:
             # First call — model from v1 template
             calls1, patcher1 = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
             try:
-                result1 = sp.spawn_worker_impl(cwd="/tmp", template="orch")
+                with fake_claude_status(_cs_happy_triples(_IID1)):
+                    result1 = sp.spawn_worker_impl(
+                        cwd="/tmp", template="orch", instance_id=_IID1
+                    )
             finally:
                 patcher1.stop()
             assert result1.get("ok") is not False, f"first spawn failed: {result1}"
@@ -881,7 +931,10 @@ class TestTemplateIntegration:
             # Second call — must see new content (no caching)
             calls2, patcher2 = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
             try:
-                result2 = sp.spawn_worker_impl(cwd="/tmp", template="orch")
+                with fake_claude_status(_cs_happy_triples(_IID2)):
+                    result2 = sp.spawn_worker_impl(
+                        cwd="/tmp", template="orch", instance_id=_IID2
+                    )
             finally:
                 patcher2.stop()
             assert result2.get("ok") is not False, f"second spawn failed: {result2}"
@@ -899,7 +952,8 @@ class TestTemplateIntegration:
         with fake_templates_dir({"orch": TEMPLATE_TOML_MINIMAL}):
             calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
             try:
-                result = sp.spawn_worker_impl(cwd=None, template="orch")
+                with fake_claude_status(_cs_happy_triples(_TEST_IID)):
+                    result = sp.spawn_worker_impl(cwd=None, template="orch", instance_id=_TEST_IID)
             finally:
                 patcher.stop()
         assert result.get("err_name") is None, (
