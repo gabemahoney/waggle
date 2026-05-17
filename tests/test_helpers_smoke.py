@@ -30,7 +30,7 @@ def test_fake_worker_record_basic_shape():
 
 def test_fake_worker_record_default_labels_keys():
     r = fake_worker_record("inst-abc", "waiting")
-    for key in ("claude_spawn_owned", "claude_spawn_session_name", "claude_spawn_model", "claude_spawn_repo"):
+    for key in ("claude_spawn_owned", "claude_spawn_session_name", "claude_spawn_model", "claude_spawn_cwd"):
         assert key in r["labels"], f"default labels missing {key!r}"
 
 

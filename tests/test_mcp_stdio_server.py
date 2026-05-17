@@ -23,6 +23,8 @@ from tests.helpers import fake_claude_status, fake_workers_response
 _EXPECTED_TOOLS = {
     "spawn_worker",
     "list_spawned_workers",
+    "list_templates",
+    "write_template",
     "send_input",
     "get_output",
     "terminate_worker",
@@ -31,9 +33,9 @@ _EXPECTED_TOOLS = {
 
 
 class TestToolRegistration:
-    def test_exactly_six_tools_registered(self):
+    def test_exactly_eight_tools_registered(self):
         tools = ms.mcp._tool_manager._tools
-        assert len(tools) == 6, f"expected 6 tools, got {len(tools)}: {list(tools)}"
+        assert len(tools) == 8, f"expected 8 tools, got {len(tools)}: {list(tools)}"
 
     def test_all_expected_tools_registered(self):
         tools = ms.mcp._tool_manager._tools
@@ -60,7 +62,7 @@ class TestSpawnWorkerErrorWrapping:
     @pytest.mark.asyncio
     async def test_exception_becomes_operation_failed(self):
         with patch("claude_spawn.spawn.spawn_worker_impl", side_effect=RuntimeError("boom")):
-            result = await ms.spawn_worker.fn("sonnet", "/tmp/repo")
+            result = await ms.spawn_worker.fn(cwd="/tmp")
         assert result["ok"] is False
         assert result["err_name"] == "ErrUnexpected"
         assert "boom" in result["err_description"]
@@ -68,18 +70,24 @@ class TestSpawnWorkerErrorWrapping:
     @pytest.mark.asyncio
     async def test_tmux_failure_propagates_as_operation_failed(self):
         with patch("claude_spawn.spawn._tmux", return_value=("", "session exists", 1)):
-            result = await ms.spawn_worker.fn("sonnet", "/tmp/repo")
+            result = await ms.spawn_worker.fn(cwd="/tmp")
         assert result.get("ok") is False
 
     @pytest.mark.asyncio
     async def test_success_returns_id_pair(self):
-        with patch(
-            "claude_spawn.spawn._tmux",
-            return_value=("", "", 0),
-        ):
-            result = await ms.spawn_worker.fn("sonnet", "/tmp/repo", "my-sess")
+        import json
+        from tests.helpers import fake_worker_record, fake_workers_response
+        _IID = "mcp-test-iid-0000-4000-8000-000000000001"
+        rec = fake_worker_record(_IID, "working", cwd="/tmp")
+        precheck = (json.dumps(fake_workers_response([])), "", 0)
+        readiness = (json.dumps(fake_workers_response([rec])), "", 0)
+        with patch("claude_spawn.spawn._tmux", return_value=("", "", 0)):
+            with fake_claude_status([precheck, readiness]):
+                result = await ms.spawn_worker.fn(
+                    cwd="/tmp", tmux_session_name="my-sess", instance_id=_IID
+                )
         assert "instance_id" in result
-        assert result["session_name"] == "my-sess"
+        assert result["tmux_session_name"] == "my-sess"
 
 
 # ---------------------------------------------------------------------------
@@ -111,6 +119,48 @@ class TestListSpawnedWorkersErrorWrapping:
             result = await ms.list_spawned_workers.fn()
         assert "workers" in result
         assert result["workers"][0]["instance_id"] == "inst-xyz"
+
+
+# ---------------------------------------------------------------------------
+# SR-7.1 error wrapping — list_templates
+# ---------------------------------------------------------------------------
+
+
+class TestListTemplatesErrorWrapping:
+    @pytest.mark.asyncio
+    async def test_exception_becomes_operation_failed(self):
+        with patch("claude_spawn.templates.list_templates_impl", side_effect=RuntimeError("crash")):
+            result = await ms.list_templates.fn()
+        assert result["ok"] is False
+        assert result["err_name"] == "ErrUnexpected"
+        assert result["operation"] == "list_templates"
+        assert "crash" in result["err_description"]
+
+
+# ---------------------------------------------------------------------------
+# SR-7.1 error wrapping — write_template
+# ---------------------------------------------------------------------------
+
+
+class TestWriteTemplateErrorWrapping:
+    @pytest.mark.asyncio
+    async def test_unexpected_exception_becomes_err_unexpected(self):
+        """Unexpected exception from impl → ok=False, ErrUnexpected, operation=write_template."""
+        with patch("claude_spawn.templates.write_template_impl", side_effect=RuntimeError("kaboom")):
+            result = await ms.write_template.fn(name="orch", options={"cwd": "/tmp"})
+        assert result["ok"] is False
+        assert result["err_name"] == "ErrUnexpected"
+        assert result["operation"] == "write_template"
+        assert "kaboom" in result["err_description"]
+
+    @pytest.mark.asyncio
+    async def test_known_error_propagates_unchanged(self):
+        """A known ErrTemplateNameUnsafe from impl propagates through the MCP tool unchanged."""
+        from tests.helpers import fake_templates_dir
+        with fake_templates_dir({}) as tdir:
+            result = await ms.write_template.fn(name="foo/bar", options={"cwd": "/tmp"})
+        assert result["ok"] is False
+        assert result["err_name"] == "ErrTemplateNameUnsafe"
 
 
 # ---------------------------------------------------------------------------

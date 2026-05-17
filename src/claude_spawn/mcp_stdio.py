@@ -33,26 +33,64 @@ def _err(operation: str, exc: Exception) -> dict:
 
 @mcp.tool()
 async def spawn_worker(
-    model: str,
-    repo: str,
-    session_name: str | None = None,
+    cwd: str | None = None,
+    template: str | None = None,
+    model: str | None = None,
+    thinking: str | None = None,
+    tmux_session_name: str | None = None,
+    instance_id: str | None = None,
+    claude_home: str | None = None,
+    claude_settings: str | None = None,
+    extra_env: dict[str, str] | None = None,
+    claude_status_labels: dict[str, str] | None = None,
+    claude_args: list[str] | None = None,
+    permissions: dict | None = None,
 ) -> dict:
     """Spawn a new Claude worker in a tmux session.
 
     Args:
-        model: Claude model name (e.g. "claude-sonnet-4-5").
-        repo: Absolute path to the working repository.
-        session_name: Optional tmux session name.
-            Defaults to ``spawn-<8-char instance prefix>``.
+        cwd: Absolute path (or ~/...) to the working directory. Required
+            unless the template supplies it.
+        template: Name of a template to load from
+            ``~/.claude-spawn/templates/<name>.toml``. Options from the
+            template are merged with per-call arguments following the SR-2.1
+            resolution chain: per-call values win; template values fill gaps;
+            SR-1.3 defaults apply when neither source provides a value.
+        model: Claude model name; inherits Claude Code default when omitted.
+        thinking: Effort level — one of "low", "medium", "high", "xhigh".
+        tmux_session_name: Tmux session name.
+            Defaults to ``<folder>-<8-char instance prefix>``.
+        instance_id: Worker UUID; defaults to a fresh UUIDv4.
+        claude_home: Override HOME for the spawned Claude process.
+        claude_settings: Path to a Claude settings JSON file; must exist.
+        extra_env: Additional environment variables for the session.
+        claude_status_labels: Extra Claude Status labels (bare key, auto-uppercased).
+        claude_args: Extra arguments appended verbatim to the claude invocation.
+        permissions: ``{"allow": [...], "deny": [...], "ask": [...]}`` overlay;
+            merged with claude_settings when both are supplied.
 
     Returns:
-        ``{"instance_id": str, "session_name": str}`` on success or
+        ``{"instance_id": str, "tmux_session_name": str}`` on success or
         an SR-7.1 operation-failed dict on failure.
     """
     import asyncio
 
     try:
-        return await asyncio.to_thread(spawn.spawn_worker_impl, model, repo, session_name)
+        return await asyncio.to_thread(
+            spawn.spawn_worker_impl,
+            cwd=cwd,
+            template=template,
+            model=model,
+            thinking=thinking,
+            tmux_session_name=tmux_session_name,
+            instance_id=instance_id,
+            claude_home=claude_home,
+            claude_settings=claude_settings,
+            extra_env=extra_env,
+            claude_status_labels=claude_status_labels,
+            claude_args=claude_args,
+            permissions=permissions,
+        )
     except Exception as exc:
         return _err("spawn_worker", exc)
 
@@ -165,6 +203,59 @@ async def list_spawned_workers() -> dict:
         return await asyncio.to_thread(spawn.list_spawned_workers_impl)
     except Exception as exc:
         return _err("list_spawned_workers", exc)
+
+
+@mcp.tool()
+async def list_templates() -> dict:
+    """List saved Claude Spawn templates.
+
+    Reads every .toml file under ~/.claude-spawn/templates/ (or the
+    directory's seam in tests). Valid templates are returned under
+    ``templates[]``; malformed files surface under ``skipped[]`` so a
+    single bad file does not hide the rest.
+
+    Returns:
+        ``{"templates": [{"name", "path", "options"}, ...],
+           "skipped": [{"path", "err_name", "err_description"}, ...]}``
+        on success or an SR-7.1 operation-failed dict on failure.
+        Missing templates directory is operation-success with both
+        lists empty (NOT an error).
+    """
+    import asyncio
+
+    try:
+        from claude_spawn import templates as templates_module
+        return await asyncio.to_thread(templates_module.list_templates_impl)
+    except Exception as exc:
+        return _err("list_templates", exc)
+
+
+@mcp.tool()
+async def write_template(name: str, options: dict, force: bool = False) -> dict:
+    """Author or overwrite a Claude Spawn template file.
+
+    Args:
+        name: Template name (filename stem). Must not contain path
+            separators, leading dot, or "..".
+        options: Option map to serialize. Keys are SR-1.1 option
+            names; values follow the SR-6.4 schema.
+        force: If True, overwrite an existing template file
+            atomically. If False, return ErrTemplateExists on
+            collision.
+
+    Returns:
+        ``{"ok": True, "path": <abs path>, "options": <normalized options>}``
+        on success or an SR-7.1 operation-failed dict on failure.
+        Error names: ErrTemplateNameUnsafe, ErrTemplateOptionsInvalid,
+        ErrTemplateExists, or ErrUnexpected (via FastMCP wrapper).
+    """
+    import asyncio
+
+    try:
+        from claude_spawn import templates as templates_module
+        return await asyncio.to_thread(templates_module.write_template_impl, name, options, force)
+    except Exception as exc:
+        return _err("write_template", exc)
 
 
 def run() -> None:

@@ -51,11 +51,284 @@ Spawn a new Claude Code worker in a tmux session.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `model` | `str` | Yes | — | Claude model (`"sonnet"`, `"haiku"`, `"opus"`) |
-| `repo` | `str` | Yes | — | Absolute local path to the repo |
-| `session_name` | `str` | No | auto | tmux session name; auto-generated as `spawn-{id[:8]}` if omitted |
+| `template` | `str` | No | None | Named template to load from `~/.claude-spawn/templates/<name>.toml`; resolved options merge with per-call args per SR-2.1 (per-call → template → default) |
+| `model` | `str` | No | inherits Claude Code | Claude model name |
+| `thinking` | `str` | No | inherits Claude Code | Effort level — one of `low`, `medium`, `high`, `xhigh` |
+| `cwd` | `str` | **Yes** | — | Absolute local path (or `~/...`) to the working directory |
+| `tmux_session_name` | `str` | No | `<folder>-<instance_id[:8]>` | tmux session name |
+| `instance_id` | `str` | No | UUIDv4 | Worker identifier |
+| `claude_home` | `str` | No | inherits Claude Code | Override `HOME` for the spawned Claude process |
+| `claude_settings` | `str` | No | inherits Claude Code | Path to a Claude settings JSON file; must exist |
+| `extra_env` | `dict[str, str]` | No | `{}` | Additional environment variables for the session |
+| `claude_status_labels` | `dict[str, str]` | No | `{}` | Extra Claude Status labels (bare key, auto-uppercased and prefixed) |
+| `claude_args` | `list[str]` | No | `[]` | Arguments appended verbatim to the `claude` invocation |
+| `permissions` | `dict` | No | `{}` | `{"allow": [], "deny": [], "ask": []}` permissions overlay |
 
-Returns: `{"ok": true, "instance_id": str, "session_name": str}`
+**Per-option fallback category (SR-1.3):**
+
+| Category | Parameters |
+|----------|------------|
+| Required (no fallback) | `cwd` |
+| Hardcoded by Claude Spawn | `tmux_session_name`, `instance_id`, `extra_env`, `claude_status_labels`, `claude_args`, `permissions` |
+| Inherits Claude Code default | `model`, `thinking`, `claude_home`, `claude_settings` |
+
+Returns: `{"instance_id": str, "tmux_session_name": str}`
+
+#### `cwd` accepts local paths only
+
+`cwd` must be an absolute local filesystem path, or a `~`-prefixed path that expands via `os.path.expanduser`. The directory must already exist.
+
+- HTTPS and SSH URLs are rejected with `ErrCwdNotAPath`. Claude Spawn never clones from a remote URL — pre-clone the repository, then pass the absolute path.
+- Relative paths (e.g. `./myrepo`) are rejected with `ErrCwdNotAPath` so the resolved directory is never ambiguous about which process's working directory it is relative to.
+- A non-existent path is rejected with `ErrCwdNotFound`. Claude Spawn does not create the directory.
+
+#### Claude Code settings stack
+
+Claude Code merges settings from four layers, lowest to highest precedence:
+
+1. Enterprise managed settings (e.g. `/etc/claude-code/managed-settings.json`)
+2. User settings — `<HOME>/.claude/settings.json`
+3. Project shared settings — `<cwd>/.claude/settings.json`
+4. Project local settings — `<cwd>/.claude/settings.local.json`
+
+The CLI `--settings <path>` overlay wins above all four layers. Claude Spawn options map to this stack as follows:
+
+- `claude_home` — rewrites `HOME` for the worker process, redirecting layer 2 to a different config tree.
+- `claude_settings` — supplies the path passed via `--settings`, the highest-precedence overlay.
+- `permissions` — realized inside that overlay. When `permissions` is supplied without `claude_settings`, Claude Spawn synthesizes a minimal `{"permissions": ...}` JSON object and passes it inline to `claude --settings <json>`. When both `claude_settings` and `permissions` are supplied, Claude Spawn reads the file, merges per-call `permissions.allow`/`deny`/`ask` on top of the file's permissions (first-class wins), serializes the result, and passes it inline. The caller's `claude_settings` file is never modified; no tempfile is created.
+
+Passing `--dangerously-skip-permissions` via `claude_args` alongside a non-empty `permissions` map is not an error; Claude Code's CLI-level bypass wins at runtime over the synthesized permissions overlay (SR-9.4).
+
+#### Readiness blocking
+
+`spawn_worker` blocks until the spawned worker registers with Claude Status. Once the call returns successfully, the returned `tmux_session_name` is immediately usable with `send_input`, `get_output`, `answer_question`, and `terminate_worker`.
+
+The default timeout is **15 seconds** (not configurable per-call or per-template in v1).
+
+**Timeout and early-exit errors:**
+
+- `ErrSpawnReadinessTimeout` — returned when 15 seconds elapse without the worker registering with Claude Status. The orphaned tmux session is automatically killed via `tmux kill-session`; no manual cleanup is needed.
+- `ErrSpawnWorkerExitedEarly` — returned when the worker's tmux session exits before registering. The error description includes captured pane output (`tmux capture-pane`) to aid diagnostics.
+
+#### Templates
+
+Option resolution follows a three-step chain: per-call argument → template field → SR-1.3 default. A template is consulted only when `template=<name>` is passed explicitly; a bare `spawn_worker(cwd=…)` call with no `template=` argument never reads the templates directory.
+
+**Storage layout.** Templates live at `~/.claude-spawn/templates/<name>.toml`; the filename stem is the template name.
+
+**TOML schema.** The top-level table may contain any of the 11 SR-1.1 option names (every parameter except `template` itself). Scalars (`cwd`, `model`, `thinking`, `tmux_session_name`, `instance_id`, `claude_home`, `claude_settings`) are TOML strings. `claude_args` is a TOML array of strings. Map options (`extra_env`, `claude_status_labels`, `permissions`) are TOML tables. Unknown keys and the `template` key are rejected at load time.
+
+**Worked example** (`~/.claude-spawn/templates/orchestrator.toml`):
+
+```toml
+cwd = "/home/horde/projects/waggle-project/waggle-main"
+model = "sonnet"
+thinking = "high"
+claude_args = ["--verbose"]
+
+[extra_env]
+LOG_LEVEL = "debug"
+
+[permissions]
+allow = ["Bash(git *)"]
+deny = ["Bash(rm -rf *)"]
+```
+
+**Merge rules:**
+
+1. *Scalars and lists* — per-call value replaces the template value wholesale when the per-call argument is not `None`. Example: template sets `model = "sonnet"`; caller passes `model="opus"` → effective model is `"opus"`.
+2. *Maps* (`extra_env`, `claude_status_labels`, `permissions`) — shallow union: template keys form the base; per-call entries are layered on top; per-call wins on any colliding top-level key. A per-call empty `{}` still enters the merge path, so template-only keys are preserved. Example: template `extra_env = {LOG_LEVEL = "info"}` plus per-call `extra_env={"TRACE": "1"}` → `{LOG_LEVEL: "info", TRACE: "1"}`.
+3. *Permissions sub-keys* — because `permissions` is a map, each sub-key (`allow`, `deny`, `ask`) is an independent top-level key in the merge. Example: template `permissions = {allow = ["Bash(git *)"]}` plus per-call `permissions={"deny": ["Bash(rm -rf *)"]}` → effective `{allow: ["Bash(git *)"], deny: ["Bash(rm -rf *)"]}`.
+
+**Errors:**
+
+- `ErrTemplateNotFound` — no `.toml` file exists for the requested name in the templates directory.
+- `ErrTemplateMalformed` — the file was found but failed schema validation (TOML parse error, unknown key, forbidden `template` key, wrong value type, or invalid `thinking` value).
+
+---
+
+### `list_templates`
+
+List all saved Claude Spawn templates.
+
+Takes no parameters.
+
+Returns `{"templates": [...], "skipped": [...]}`. Missing templates directory
+returns empty lists — operation-success, not an error.
+
+**`templates[]` entries** — one per valid template file:
+
+| Field | Description |
+|-------|-------------|
+| `name` | Filename stem (e.g. `orchestrator` for `orchestrator.toml`) |
+| `path` | Absolute path to the `.toml` file on disk |
+| `options` | Resolved option map parsed from the file |
+
+**`skipped[]` entries** — one per file that could not be loaded:
+
+| Field | Description |
+|-------|-------------|
+| `path` | Absolute path to the file |
+| `err_name` | Always `ErrTemplateMalformed` |
+| `err_description` | Parser or schema detail naming the specific failure |
+
+**Worked example** — templates directory contains `orchestrator.toml` (valid)
+and `broken.toml` (malformed):
+
+```json
+{
+  "templates": [
+    {
+      "name": "orchestrator",
+      "path": "/home/horde/.claude-spawn/templates/orchestrator.toml",
+      "options": {
+        "cwd": "/home/horde/projects/waggle-project/waggle-main",
+        "model": "sonnet",
+        "thinking": "high",
+        "claude_args": ["--verbose"],
+        "extra_env": {"LOG_LEVEL": "debug"},
+        "permissions": {"allow": ["Bash(git *)"], "deny": ["Bash(rm -rf *)"]}
+      }
+    }
+  ],
+  "skipped": [
+    {
+      "path": "/home/horde/.claude-spawn/templates/broken.toml",
+      "err_name": "ErrTemplateMalformed",
+      "err_description": "/home/horde/.claude-spawn/templates/broken.toml: 'ultra' is not one of low, medium, high, xhigh"
+    }
+  ]
+}
+```
+
+`list_templates` reads the templates directory on disk. `list_spawned_workers`
+queries Claude Status's `instances` table. The two tools have independent data
+sources and return different shapes.
+
+---
+
+### `write_template`
+
+Author or overwrite a Claude Spawn template file.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `name` | `str` | **Yes** | — | Template name (filename stem) |
+| `options` | `dict` | **Yes** | — | Option map to write; keys are SR-1.1 option names |
+| `force` | `bool` | No | `False` | If `True`, overwrite an existing template atomically |
+
+**Returns on success:** `{"ok": true, "path": <abs path>, "options": <normalized options>}`
+
+`path` is the canonical absolute path to the written file (e.g. `~/.claude-spawn/templates/<name>.toml` fully expanded). `options` echoes the option map that was written, confirming what passed validation.
+
+**`force` flag:**
+
+- Without `force` (default `False`): if a template named `<name>` already exists, `write_template` returns `ErrTemplateExists` and leaves the existing file unchanged.
+- With `force=True`: the existing file is overwritten using a sibling temp file and `os.replace`. Crash safety is preserved — a crash between the temp write and the rename leaves the canonical file untouched.
+
+**Error responses:**
+
+```jsonc
+// ErrTemplateNameUnsafe — name fails path-safety checks (path separator,
+// leading dot, ".." substring, or empty)
+{"ok": false, "operation": "write_template", "err_name": "ErrTemplateNameUnsafe",
+ "err_description": "name must not contain '/'"}
+
+// ErrTemplateOptionsInvalid — options dict fails SR-6.4 schema validation
+{"ok": false, "operation": "write_template", "err_name": "ErrTemplateOptionsInvalid",
+ "err_description": "thinking must be one of low, medium, high, xhigh; got 'ultra'"}
+
+// ErrTemplateExists — file exists and force=False
+{"ok": false, "operation": "write_template", "err_name": "ErrTemplateExists",
+ "err_description": "template 'orch' already exists at '/home/horde/.claude-spawn/templates/orch.toml'; pass force=True to overwrite"}
+
+// ErrUnexpected — unexpected exception surfaced by the FastMCP wrapper;
+// err_description is str(exc)
+{"ok": false, "operation": "write_template", "err_name": "ErrUnexpected",
+ "err_description": "<exception message>"}
+```
+
+MCP authoring, the CLI subcommand below, and hand-edit all share the same impl — the resulting `.toml` file is byte-identical regardless of surface.
+
+---
+
+### `claude-spawn write-template`
+
+Create or overwrite a Claude Spawn template file from the command line.
+
+**Flag-driven example:**
+
+```sh
+claude-spawn write-template orch \
+  --cwd=/home/horde/projects/myrepo \
+  --model=opus \
+  --thinking=xhigh \
+  --permissions-allow=Bash \
+  --permissions-deny=WebFetch \
+  --extra-env-entry FOO=bar \
+  --claude-status-labels-entry role=orchestrator \
+  --claude-arg --dangerously-skip-permissions
+```
+
+Stdout on success:
+
+```
+{"ok": true, "path": "/home/horde/.claude-spawn/templates/orch.toml", "options": {"cwd": "/home/horde/projects/myrepo", "model": "opus", "thinking": "xhigh", "extra_env": {"FOO": "bar"}, "claude_status_labels": {"role": "orchestrator"}, "claude_args": ["--dangerously-skip-permissions"], "permissions": {"allow": ["Bash"], "deny": ["WebFetch"]}}}
+```
+
+**Interactive mode:**
+
+Pass `--interactive` to be prompted for each field. Type `skip` (or leave blank and press Enter for list/map fields) to leave a field unset.
+
+```
+$ claude-spawn write-template myagent --interactive
+cwd — Working directory for the spawned agent (skip to leave unset):
+> /tmp
+model — Claude model identifier (e.g. claude-opus-4-5) (skip to leave unset):
+> opus
+thinking — Thinking level: low, medium, high, or xhigh (skip to leave unset):
+> skip
+... (remaining fields: press Enter or type skip to leave unset)
+{"ok": true, "path": "/home/horde/.claude-spawn/templates/myagent.toml", "options": {"cwd": "/tmp", "model": "opus"}}
+```
+
+**Repeatable flags:**
+
+Each entry for `--extra-env-entry`, `--claude-status-labels-entry`, `--permissions-allow`, `--permissions-deny`, `--permissions-ask`, and `--claude-arg` is specified once per value; repeat the flag to add more:
+
+```sh
+--extra-env-entry FOO=1 --extra-env-entry BAR=2
+--permissions-allow=Bash --permissions-allow=Read
+```
+
+**`--force` flag:**
+
+Without `--force`, a collision with an existing template returns `ErrTemplateExists` and leaves the file untouched; with `--force`, the existing file is overwritten atomically.
+
+**Cancellation:**
+
+Ctrl-C or EOF during interactive mode prints `{"status":"error","message":"write-template cancelled"}` on stdout, exits non-zero, and writes no file.
+
+**Flag-to-option mapping:**
+
+| CLI flag | SR-1.1 option | Notes |
+|----------|---------------|-------|
+| `name` (positional) | filename stem | — |
+| `--interactive` | — | mode control (not an option) |
+| `--cwd` | `cwd` | — |
+| `--model` | `model` | — |
+| `--thinking` | `thinking` | — |
+| `--tmux-session-name` | `tmux_session_name` | — |
+| `--instance-id` | `instance_id` | — |
+| `--claude-home` | `claude_home` | — |
+| `--claude-settings` | `claude_settings` | — |
+| `--claude-arg` | `claude_args[]` | repeatable; appends |
+| `--extra-env-entry` | `extra_env{}` | repeatable; `KEY=VALUE` per flag |
+| `--claude-status-labels-entry` | `claude_status_labels{}` | repeatable; `KEY=VALUE` per flag |
+| `--permissions-allow` | `permissions.allow[]` | repeatable |
+| `--permissions-deny` | `permissions.deny[]` | repeatable |
+| `--permissions-ask` | `permissions.ask[]` | repeatable |
+| `--force` | — | overwrite control (not an option) |
 
 ---
 
@@ -66,9 +339,8 @@ List all Claude Spawn-managed workers visible via Claude Status.
 Returns:
 ```json
 {
-  "ok": true,
   "workers": [
-    {"instance_id": "...", "session_name": "spawn-abc12345"}
+    {"instance_id": "...", "session_name": "spawn-abc12345", "cwd": "/some/path"}
   ]
 }
 ```
