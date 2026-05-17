@@ -248,7 +248,87 @@ Author or overwrite a Claude Spawn template file.
  "err_description": "<exception message>"}
 ```
 
-MCP authoring or hand-edit; the CLI surface added in a later Epic shares the same impl.
+MCP authoring, the CLI subcommand below, and hand-edit all share the same impl — the resulting `.toml` file is byte-identical regardless of surface.
+
+---
+
+### `claude-spawn write-template`
+
+Create or overwrite a Claude Spawn template file from the command line.
+
+**Flag-driven example:**
+
+```sh
+claude-spawn write-template orch \
+  --cwd=/home/horde/projects/myrepo \
+  --model=opus \
+  --thinking=xhigh \
+  --permissions-allow=Bash \
+  --permissions-deny=WebFetch \
+  --extra-env-entry FOO=bar \
+  --claude-status-labels-entry role=orchestrator \
+  --claude-arg --dangerously-skip-permissions
+```
+
+Stdout on success:
+
+```
+{"ok": true, "path": "/home/horde/.claude-spawn/templates/orch.toml", "options": {"cwd": "/home/horde/projects/myrepo", "model": "opus", "thinking": "xhigh", "extra_env": {"FOO": "bar"}, "claude_status_labels": {"role": "orchestrator"}, "claude_args": ["--dangerously-skip-permissions"], "permissions": {"allow": ["Bash"], "deny": ["WebFetch"]}}}
+```
+
+**Interactive mode:**
+
+Pass `--interactive` to be prompted for each field. Type `skip` (or leave blank and press Enter for list/map fields) to leave a field unset.
+
+```
+$ claude-spawn write-template myagent --interactive
+cwd — Working directory for the spawned agent (skip to leave unset):
+> /tmp
+model — Claude model identifier (e.g. claude-opus-4-5) (skip to leave unset):
+> opus
+thinking — Thinking level: low, medium, high, or xhigh (skip to leave unset):
+> skip
+... (remaining fields: press Enter or type skip to leave unset)
+{"ok": true, "path": "/home/horde/.claude-spawn/templates/myagent.toml", "options": {"cwd": "/tmp", "model": "opus"}}
+```
+
+**Repeatable flags:**
+
+Each entry for `--extra-env-entry`, `--claude-status-labels-entry`, `--permissions-allow`, `--permissions-deny`, `--permissions-ask`, and `--claude-arg` is specified once per value; repeat the flag to add more:
+
+```sh
+--extra-env-entry FOO=1 --extra-env-entry BAR=2
+--permissions-allow=Bash --permissions-allow=Read
+```
+
+**`--force` flag:**
+
+Without `--force`, a collision with an existing template returns `ErrTemplateExists` and leaves the file untouched; with `--force`, the existing file is overwritten atomically.
+
+**Cancellation:**
+
+Ctrl-C or EOF during interactive mode prints `{"status":"error","message":"write-template cancelled"}` on stdout, exits non-zero, and writes no file.
+
+**Flag-to-option mapping:**
+
+| CLI flag | SR-1.1 option | Notes |
+|----------|---------------|-------|
+| `name` (positional) | filename stem | — |
+| `--interactive` | — | mode control (not an option) |
+| `--cwd` | `cwd` | — |
+| `--model` | `model` | — |
+| `--thinking` | `thinking` | — |
+| `--tmux-session-name` | `tmux_session_name` | — |
+| `--instance-id` | `instance_id` | — |
+| `--claude-home` | `claude_home` | — |
+| `--claude-settings` | `claude_settings` | — |
+| `--claude-arg` | `claude_args[]` | repeatable; appends |
+| `--extra-env-entry` | `extra_env{}` | repeatable; `KEY=VALUE` per flag |
+| `--claude-status-labels-entry` | `claude_status_labels{}` | repeatable; `KEY=VALUE` per flag |
+| `--permissions-allow` | `permissions.allow[]` | repeatable |
+| `--permissions-deny` | `permissions.deny[]` | repeatable |
+| `--permissions-ask` | `permissions.ask[]` | repeatable |
+| `--force` | — | overwrite control (not an option) |
 
 ---
 

@@ -225,10 +225,10 @@ server session take effect on the next spawn without reload.
 
 ### Single-impl note
 
-`write_template_impl` is the shared implementation that both the Epic 5 MCP
-tool and the Epic 6 CLI subcommand (forward reference) delegate to. The
-resulting `.toml` file is byte-identical regardless of which surface authored
-it.
+`write_template_impl` (in `src/claude_spawn/templates.py`) is the shared
+implementation that both the MCP tool `write_template` and the CLI subcommand
+`claude-spawn write-template` delegate to. The resulting `.toml` file is
+byte-identical regardless of which surface authored it.
 
 ## Errors
 
