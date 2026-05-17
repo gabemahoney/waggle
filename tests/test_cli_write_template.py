@@ -570,7 +570,7 @@ class TestSurfacesConverge:
             _ = capsys.readouterr()
 
             # (c) MCP tool (direct async call)
-            mcp_result = asyncio.get_event_loop().run_until_complete(
+            mcp_result = asyncio.run(
                 ms.write_template.fn(
                     name="conv_mcp",
                     options=self._BUNDLE,

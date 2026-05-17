@@ -51,7 +51,7 @@ Spawn a new Claude Code worker in a tmux session.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `template` | `str` | No | None | Reserved for template loading (Epic 3); accepted but not loaded |
+| `template` | `str` | No | None | Named template to load from `~/.claude-spawn/templates/<name>.toml`; resolved options merge with per-call args per SR-2.1 (per-call → template → default) |
 | `model` | `str` | No | inherits Claude Code | Claude model name |
 | `thinking` | `str` | No | inherits Claude Code | Effort level — one of `low`, `medium`, `high`, `xhigh` |
 | `cwd` | `str` | **Yes** | — | Absolute local path (or `~/...`) to the working directory |
@@ -339,9 +339,8 @@ List all Claude Spawn-managed workers visible via Claude Status.
 Returns:
 ```json
 {
-  "ok": true,
   "workers": [
-    {"instance_id": "...", "session_name": "spawn-abc12345"}
+    {"instance_id": "...", "session_name": "spawn-abc12345", "cwd": "/some/path"}
   ]
 }
 ```

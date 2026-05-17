@@ -102,6 +102,7 @@ class TestListTemplatesMalformedChannel:
 
         assert len(result["skipped"]) == 1
         skipped = result["skipped"][0]
+        assert skipped["name"] == "bad"
         assert skipped["path"].endswith("/bad.toml")
         assert skipped["err_name"] == "ErrTemplateMalformed"
         assert skipped["err_description"]  # non-empty

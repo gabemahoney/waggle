@@ -512,6 +512,56 @@ class TestSettingsOverlay:
         finally:
             os.unlink(caller_path)
 
+    def test_err_claude_settings_malformed_bad_json(self):
+        """Malformed JSON in claude_settings → ErrClaudeSettingsMalformed, no tmux calls."""
+        with tempfile.NamedTemporaryFile(
+            suffix=".json", mode="w", delete=False
+        ) as f:
+            f.write('{"permissions": [bad]}')
+            bad_path = f.name
+        try:
+            calls, patcher = _patch_tmux([])
+            try:
+                result = sp.spawn_worker_impl(
+                    cwd="/tmp",
+                    claude_settings=bad_path,
+                    permissions={"allow": ["X"]},
+                )
+            finally:
+                patcher.stop()
+            assert result.get("err_name") == "ErrClaudeSettingsMalformed", (
+                f"expected ErrClaudeSettingsMalformed, got {result!r}"
+            )
+            assert result.get("ok") is False
+            assert len(calls) == 0, f"expected no tmux calls; got {calls}"
+        finally:
+            os.unlink(bad_path)
+
+    def test_err_claude_settings_malformed_permissions_not_dict(self):
+        """settings file with permissions as list → ErrClaudeSettingsMalformed, no tmux calls."""
+        with tempfile.NamedTemporaryFile(
+            suffix=".json", mode="w", delete=False
+        ) as f:
+            json.dump({"permissions": [1, 2, 3]}, f)
+            bad_path = f.name
+        try:
+            calls, patcher = _patch_tmux([])
+            try:
+                result = sp.spawn_worker_impl(
+                    cwd="/tmp",
+                    claude_settings=bad_path,
+                    permissions={"allow": ["X"]},
+                )
+            finally:
+                patcher.stop()
+            assert result.get("err_name") == "ErrClaudeSettingsMalformed", (
+                f"expected ErrClaudeSettingsMalformed, got {result!r}"
+            )
+            assert result.get("ok") is False
+            assert len(calls) == 0, f"expected no tmux calls; got {calls}"
+        finally:
+            os.unlink(bad_path)
+
 
 # ---------------------------------------------------------------------------
 # TestValidationErrors — SR-9.1
@@ -682,6 +732,26 @@ class TestValidationErrors:
                 cwd="/tmp",
                 claude_home="/custom/home",
                 extra_env={"HOME": "y"},
+            )
+        finally:
+            patcher.stop()
+        self._assert_error(result, calls, "ErrReservedEnvKey")
+
+    # -- ErrReservedEnvKey (claude_status_labels) -------------------------
+
+    @pytest.mark.parametrize("reserved_key", [
+        "claude_spawn_owned",
+        "claude_spawn_session_name",
+        "claude_spawn_cwd",
+        "claude_spawn_model",
+    ])
+    def test_err_reserved_label_key_rejected(self, reserved_key):
+        """claude_status_labels with a reserved key returns ErrReservedEnvKey, no tmux calls."""
+        calls, patcher = _patch_tmux([])
+        try:
+            result = sp.spawn_worker_impl(
+                cwd="/tmp",
+                claude_status_labels={reserved_key: "0"},
             )
         finally:
             patcher.stop()
@@ -1017,3 +1087,32 @@ class TestTemplateIntegration:
             f"expected ErrTemplateMalformed (not remapped to a per-call error); got {result!r}"
         )
         assert len(calls) == 0, f"no tmux calls expected; got {calls}"
+
+    # ------------------------------------------------------------------
+    # Case 13 — empty per-call dict: template-only keys survive
+    # ------------------------------------------------------------------
+
+    def test_case_13_empty_per_call_dict_preserves_template_keys(self):
+        """Per-call extra_env={} has no entries to override, so template FOO=1 survives.
+
+        SR-2.2 / _merge_maps: an explicit empty per-call dict enters the merge
+        path but contributes nothing, so all template-only keys are preserved.
+        """
+        tpl_data = {"cwd": "/tmp", "extra_env": {"FOO": "1"}}
+        with fake_templates_dir({"orch": tomli_w.dumps(tpl_data)}):
+            calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
+            try:
+                with fake_claude_status(_cs_happy_triples(_TEST_IID)):
+                    result = sp.spawn_worker_impl(
+                        cwd="/tmp",
+                        template="orch",
+                        extra_env={},
+                        instance_id=_TEST_IID,
+                    )
+            finally:
+                patcher.stop()
+        assert result.get("ok") is not False, f"spawn failed: {result}"
+        pairs = _env_pairs(calls[0])
+        assert pairs.get("FOO") == "1", (
+            "template-only key FOO must survive when per-call extra_env={}"
+        )

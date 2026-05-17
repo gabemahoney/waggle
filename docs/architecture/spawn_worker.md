@@ -13,7 +13,7 @@ calls go through the `_tmux(argv)` seam.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `template` | `str` | No | None | Reserved for Epic 3 template loading; accepted but not loaded |
+| `template` | `str` | No | None | Named template to load from `~/.claude-spawn/templates/<name>.toml`; resolved options merge with per-call args per SR-2.1 (per-call → template → default) |
 | `model` | `str` | No | inherits Claude Code | Claude model name |
 | `thinking` | `str` | No | inherits Claude Code | Effort level — one of `low`, `medium`, `high`, `xhigh` |
 | `cwd` | `str` | **Yes** | — | Absolute local path (or `~/...`) to the working directory |
@@ -28,20 +28,25 @@ calls go through the `_tmux(argv)` seam.
 
 ## Flow
 
-1. **Validate inputs** — all SR-9.1 checks run before any tmux call (see Errors table).
-2. **Generate defaults** — `instance_id` defaults to a fresh UUIDv4; `tmux_session_name`
+1. **Load template** (if `template=<name>` supplied) — `templates.load_template(name)` is called
+   before any validation. `ErrTemplateNotFound` or `ErrTemplateMalformed` surfaces here and
+   aborts the call immediately, before validation runs.
+2. **Resolve options** — `_resolve_options()` merges per-call args, template fields, and
+   SR-1.3 defaults per SR-2.1 (per-call → template → default).
+3. **Validate inputs** — all SR-9.1 checks run before any tmux call (see Errors table).
+4. **Generate defaults** — `instance_id` defaults to a fresh UUIDv4; `tmux_session_name`
    defaults to `<sanitize(cwd)>-<instance_id[:8]>`.
-3. **Synthesize settings overlay** (SR-4.5) — see Settings Overlay section below.
-4. **Create tmux session** via `tmux new-session -d -s <name> -c <cwd> -e KEY=VAL ...`
+5. **Synthesize settings overlay** (SR-4.5) — see Settings Overlay section below.
+6. **Create tmux session** via `tmux new-session -d -s <name> -c <cwd> -e KEY=VAL ...`
    — the `-c` flag sets the start directory directly on `new-session`; no `cd` preamble
    is sent via `send-keys`.
-5. **Inject env vars** (SR-4.2) — six unconditional vars plus conditionals (see below).
-6. **Launch claude** via `tmux send-keys` with the SR-4.4 composed command line.
-7. **Readiness wait** (SR-5) — poll `claude_status.workers(label="claude_spawn_owned=1")` every ~100 ms via the `_run` seam. Scan for `record["instance_id"] == <instance_id>` (exact match, SR-10.1). Each iteration also probes `tmux has-session -t <name>`:
+7. **Inject env vars** (SR-4.2) — six unconditional vars plus conditionals (see below).
+8. **Launch claude** via `tmux send-keys` with the SR-4.4 composed command line.
+9. **Readiness wait** (SR-5) — poll `claude_status.workers(label="claude_spawn_owned=1")` every ~100 ms via the `_run` seam. Scan for `record["instance_id"] == <instance_id>` (exact match, SR-10.1). Each iteration also probes `tmux has-session -t <name>`:
    - **Match found** → proceed to return.
    - **Session gone** (non-zero `has-session`) → best-effort `tmux capture-pane` to collect diagnostic output → return `ErrSpawnWorkerExitedEarly` with pane text in `err_description`.
    - **15-second timeout** (`_SPAWN_READINESS_TIMEOUT`) → best-effort `tmux kill-session -t <name>` → return `ErrSpawnReadinessTimeout`.
-8. **Return** `{"instance_id": str, "tmux_session_name": str}`.
+10. **Return** `{"instance_id": str, "tmux_session_name": str}`.
 
 ### Environment variables (SR-4.2)
 
@@ -91,7 +96,7 @@ Three synthesis paths determine the `--settings` path passed to `claude`:
 | Both `claude_settings` and `permissions` supplied | Claude Spawn writes a composite temp file: caller's file keys pass through; first-class `permissions.allow`/`deny`/`ask` win on those three keys |
 | Neither supplied | No `--settings` flag |
 
-Template loading (Epic 3) will extend this flow. See `docs/architecture/spawn_options_and_templates.md` (created in Epic 3) for details.
+Template loading extends this flow when `template=<name>` is supplied — see [`spawn_options_and_templates.md`](./spawn_options_and_templates.md) for the option-resolution chain and merge semantics.
 
 ## Claude Status integration
 
@@ -106,6 +111,7 @@ Workers appear in `claude-status workers` output with the `claude_spawn_owned=1`
 | `ErrCwdNotFound` | `cwd` (after `~` expansion) does not exist on disk |
 | `ErrCwdNotAPath` | `cwd` is a URL (`://` present) or a relative path |
 | `ErrClaudeSettingsNotFound` | `claude_settings` path does not exist on disk |
+| `ErrClaudeSettingsMalformed` | `claude_settings` file is unreadable as JSON, or its `permissions` key is present but not a dict (surface: settings overlay synthesis) |
 | `ErrInstanceIdCollision` | Caller-supplied `instance_id` matches an active worker |
 | `ErrClaudeArgsSettingsConflict` | `--settings` appears in `claude_args` while `claude_settings` or `permissions` is also set |
 | `ErrReservedEnvKey` | An `extra_env` key collides with a key Claude Spawn always emits |

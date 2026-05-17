@@ -236,6 +236,9 @@ byte-identical regardless of which surface authored it.
 |----------|-----------|
 | `ErrTemplateNotFound` | No `.toml` file exists for the requested name in the templates directory. The error description names both the template name and the directory path. |
 | `ErrTemplateMalformed` | The file was found but failed schema validation. The error description names the file path and the specific validation failure. |
+| `ErrTemplateNameUnsafe` | Surface: `write_template` (MCP + CLI). Name fails SR-7.4: empty, contains a path separator (`/` or `\`), equals `.` or `..`, contains `..` as a substring, or starts with `.`. |
+| `ErrTemplateOptionsInvalid` | Surface: `write_template` (MCP + CLI). Options dict fails SR-6.4 schema validation: unknown key, recursive `template` key, invalid `thinking` value, or type mismatch. |
+| `ErrTemplateExists` | Surface: `write_template` (MCP + CLI). A file already exists at the canonical path and `force=False`. |
 
 ## Sequence diagram
 

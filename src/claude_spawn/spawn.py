@@ -82,6 +82,11 @@ _SPAWN_READINESS_TIMEOUT = 15
 # Keys claude-spawn always emits itself (extra_env must not collide with these)
 _RESERVED_ENV_KEYS = set(_REQUIRED_ENV_VARS) | {"CLAUDE_STATUS_LABEL_CLAUDE_SPAWN_MODEL"}
 
+# Label keys claude-spawn always emits (claude_status_labels must not collide with these)
+_RESERVED_LABEL_KEYS = frozenset(
+    {"CLAUDE_SPAWN_OWNED", "CLAUDE_SPAWN_SESSION_NAME", "CLAUDE_SPAWN_CWD", "CLAUDE_SPAWN_MODEL"}
+)
+
 
 def _merge_maps(per_call: dict | None, tmpl: dict | None) -> dict:
     """SR-2.2 shallow map merge: union, per-call entries win on colliding top-level keys.
@@ -188,10 +193,29 @@ def _resolve_settings_path(
         return claude_settings
 
     # composite: caller's file + per-call permissions (first-class wins on allow/deny/ask)
-    with open(claude_settings) as f:  # type: ignore[arg-type]
-        base = json.load(f)
+    try:
+        with open(claude_settings) as f:  # type: ignore[arg-type]
+            base = json.load(f)
+    except json.JSONDecodeError as exc:
+        return {
+            "ok": False,
+            "operation": "spawn_worker",
+            "err_name": "ErrClaudeSettingsMalformed",
+            "err_description": f"claude_settings {claude_settings!r}: JSON parse error: {exc}",
+        }
 
-    base_perms = base.get("permissions", {})
+    raw_perms = base.get("permissions")
+    if raw_perms is not None and not isinstance(raw_perms, dict):
+        return {
+            "ok": False,
+            "operation": "spawn_worker",
+            "err_name": "ErrClaudeSettingsMalformed",
+            "err_description": (
+                f"claude_settings {claude_settings!r}: 'permissions' must be an object,"
+                f" got {type(raw_perms).__name__}"
+            ),
+        }
+    base_perms: dict = raw_perms if raw_perms is not None else {}
     for key in ("allow", "deny", "ask"):
         if key in permissions:
             base_perms[key] = permissions[key]
@@ -339,6 +363,15 @@ def spawn_worker_impl(
                 f"extra_env key {key!r} is reserved by claude-spawn and may not be overridden",
             )
 
+    # ErrReservedEnvKey — claude_status_labels keys must not collide with reserved labels
+    for key in claude_status_labels:
+        if key.upper() in _RESERVED_LABEL_KEYS:
+            return _err_spawn(
+                "ErrReservedEnvKey",
+                f"claude_status_labels key {key!r} is reserved by claude-spawn"
+                " and may not be overridden",
+            )
+
     # ErrInstanceIdCollision — only when caller explicitly supplied instance_id
     if caller_supplied_instance_id:
         cs_result = claude_status.workers(label="claude_spawn_owned=1")
@@ -362,6 +395,8 @@ def spawn_worker_impl(
 
     # --- SR-4.5 settings overlay synthesis ---
     effective_settings_path = _resolve_settings_path(permissions, claude_settings)
+    if isinstance(effective_settings_path, dict):
+        return effective_settings_path  # ErrClaudeSettingsMalformed
 
     # --- SR-4.1–4.4 tmux launch composition ---
 
@@ -574,9 +609,7 @@ def terminate_worker_impl(session_name: str) -> dict:
 # answer_question
 # ---------------------------------------------------------------------------
 
-import re as _re
-
-_WS_RE = _re.compile(r"\s+")
+_WS_RE = re.compile(r"\s+")
 
 
 def _normalize_ws(text: str) -> str:

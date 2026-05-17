@@ -277,6 +277,31 @@ class TestEnumerateMixed:
         assert by_name["good"]["load_template"]["cwd"] == "/tmp"
 
 
+class TestEnumerateNonTomlFilesIgnored:
+    """enumerate_templates must silently skip non-.toml files."""
+
+    def test_txt_and_tomlx_files_are_invisible(self, tmp_path):
+        """notes.txt and template.tomlx are not yielded by enumerate_templates."""
+        import os
+        from unittest.mock import patch as _patch
+
+        # Write two non-.toml files directly (fake_templates_dir only writes .toml)
+        (tmp_path / "notes.txt").write_text("this is a text file", encoding="utf-8")
+        (tmp_path / "template.tomlx").write_text("[bad]", encoding="utf-8")
+        # Also write one real .toml so we confirm enumeration still works
+        (tmp_path / "valid.toml").write_text(TEMPLATE_TOML_MINIMAL, encoding="utf-8")
+
+        with _patch("claude_spawn.templates._templates_dir", return_value=str(tmp_path)):
+            results = list(tmpl.enumerate_templates())
+
+        names = [name for name, _, _ in results]
+        assert "notes" not in names, "notes.txt must be ignored"
+        assert "template" not in names, "template.tomlx must be ignored"
+        assert "template.tomlx" not in names, "template.tomlx must be ignored"
+        assert "valid" in names, "valid.toml must be yielded"
+        assert len(results) == 1, f"expected exactly 1 entry, got {len(results)}: {names}"
+
+
 # ---------------------------------------------------------------------------
 # 11. Import-time no filesystem reads
 # ---------------------------------------------------------------------------

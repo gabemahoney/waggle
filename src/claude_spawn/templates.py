@@ -423,6 +423,7 @@ def list_templates_impl() -> dict:
     for name, path, parsed_or_err in enumerate_templates():
         if parsed_or_err.get("ok") is False:
             skipped.append({
+                "name": name,
                 "path": path,
                 "err_name": parsed_or_err["err_name"],
                 "err_description": parsed_or_err["err_description"],

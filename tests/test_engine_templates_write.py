@@ -17,7 +17,6 @@ or programmatic tomli_w construction. No test touches ~/.claude-spawn/templates/
 from __future__ import annotations
 
 import os
-import shutil
 import tomllib
 from unittest.mock import patch
 
@@ -35,8 +34,6 @@ from tests.sample_payloads import (
 # Parse the canonical full-options fixture once at module level (no literal TOML here).
 _FULL_OPTIONS = tomllib.loads(TEMPLATE_TOML_FULL)
 
-# A nonexistent path we control for the directory-auto-creation test.
-_AUTOCREATE_DIR = "/tmp/test-waggle-write-template-autocreate-xyz9871"
 
 
 # ---------------------------------------------------------------------------
@@ -266,26 +263,18 @@ class TestOptionsValidationErrors:
 class TestDirectoryAutoCreation:
     """write_template_impl creates the templates directory if it does not exist."""
 
-    def setup_method(self):
-        """Ensure the test directory does not exist before each test."""
-        if os.path.exists(_AUTOCREATE_DIR):
-            shutil.rmtree(_AUTOCREATE_DIR)
-
-    def teardown_method(self):
-        """Clean up the test directory after each test."""
-        if os.path.exists(_AUTOCREATE_DIR):
-            shutil.rmtree(_AUTOCREATE_DIR)
-
-    def test_missing_dir_gets_created(self):
-        assert not os.path.exists(_AUTOCREATE_DIR), "test dir already exists before test"
-        with patch("claude_spawn.templates._templates_dir", return_value=_AUTOCREATE_DIR):
+    def test_missing_dir_gets_created(self, tmp_path):
+        autocreate_dir = str(tmp_path / "autocreate")
+        assert not os.path.exists(autocreate_dir), "test dir already exists before test"
+        with patch("claude_spawn.templates._templates_dir", return_value=autocreate_dir):
             result = write_template_impl("x", {"cwd": "/tmp"}, force=False)
         assert result["ok"] is True
-        assert os.path.isdir(_AUTOCREATE_DIR), "templates directory was not auto-created"
+        assert os.path.isdir(autocreate_dir), "templates directory was not auto-created"
 
-    def test_file_written_in_new_dir(self):
-        with patch("claude_spawn.templates._templates_dir", return_value=_AUTOCREATE_DIR):
+    def test_file_written_in_new_dir(self, tmp_path):
+        autocreate_dir = str(tmp_path / "autocreate")
+        with patch("claude_spawn.templates._templates_dir", return_value=autocreate_dir):
             result = write_template_impl("x", {"cwd": "/tmp"}, force=False)
         assert result["ok"] is True
-        expected_path = os.path.join(_AUTOCREATE_DIR, "x.toml")
+        expected_path = os.path.join(autocreate_dir, "x.toml")
         assert os.path.exists(expected_path), f"expected file at {expected_path}"

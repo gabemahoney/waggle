@@ -14,6 +14,7 @@ import pytest
 import claude_spawn.spawn as sp
 from tests.helpers import (
     fake_claude_status,
+    fake_templates_dir,
     fake_worker_record,
     fake_workers_response,
 )
@@ -349,28 +350,19 @@ class TestOldSignatureRejection:
         With the new 12-option signature the positional slots are
         (cwd, template, model, ...), so passing the legacy (model, repo,
         session_name) shape as positionals maps "opus" to cwd, "/tmp" to
-        template, "name" to model.  "opus" is not a valid filesystem path, so
-        the impl returns ErrCwdNotAPath — the old shape is rejected, just via
-        validation rather than TypeError.
+        template, "name" to model.
 
-        At the FastMCP layer, the tool declaration has cwd as a *required
-        named* parameter; a caller omitting it gets a FastMCP parameter-
-        mismatch error before the impl is reached.  Both layers reject the
-        legacy shape without producing a successful spawn.
+        Wrapping in fake_templates_dir({}) ensures the template loader fires
+        first and returns ErrTemplateNotFound for the "/tmp" template name —
+        regardless of whether ~/.claude-spawn/templates/ exists on the host.
         """
-        result = sp.spawn_worker_impl("opus", "/tmp", "name")
+        with fake_templates_dir({}):
+            result = sp.spawn_worker_impl("opus", "/tmp", "name")
         # The old positional shape must not succeed (no instance_id key).
         assert "instance_id" not in result, (
             "old positional shape must not produce a successful result"
         )
         assert result.get("ok") is False
-        # With template wiring, template="/tmp" is checked before cwd validation.
-        # Depending on whether the template directory exists, the impl returns
-        # ErrTemplateNotFound (loader fires first) or a cwd error.  All forms
-        # reject the old positional shape without producing a successful spawn.
-        assert result.get("err_name") in (
-            "ErrCwdNotAPath",
-            "ErrCwdNotFound",
-            "ErrCwdMissing",
-            "ErrTemplateNotFound",
-        ), f"unexpected err_name: {result.get('err_name')!r}"
+        assert result.get("err_name") == "ErrTemplateNotFound", (
+            f"unexpected err_name: {result.get('err_name')!r}"
+        )

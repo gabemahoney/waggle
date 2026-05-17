@@ -33,7 +33,7 @@ def _err(operation: str, exc: Exception) -> dict:
 
 @mcp.tool()
 async def spawn_worker(
-    cwd: str,
+    cwd: str | None = None,
     template: str | None = None,
     model: str | None = None,
     thinking: str | None = None,
@@ -49,8 +49,13 @@ async def spawn_worker(
     """Spawn a new Claude worker in a tmux session.
 
     Args:
-        cwd: Absolute path (or ~/...) to the working directory.  Required.
-        template: Reserved for Epic 3 template loading; accepted but ignored.
+        cwd: Absolute path (or ~/...) to the working directory. Required
+            unless the template supplies it.
+        template: Name of a template to load from
+            ``~/.claude-spawn/templates/<name>.toml``. Options from the
+            template are merged with per-call arguments following the SR-2.1
+            resolution chain: per-call values win; template values fill gaps;
+            SR-1.3 defaults apply when neither source provides a value.
         model: Claude model name; inherits Claude Code default when omitted.
         thinking: Effort level — one of "low", "medium", "high", "xhigh".
         tmux_session_name: Tmux session name.
