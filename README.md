@@ -99,6 +99,41 @@ The CLI `--settings <path>` overlay wins above all four layers. Claude Spawn opt
 
 Passing `--dangerously-skip-permissions` via `claude_args` alongside a non-empty `permissions` map is not an error; Claude Code's CLI-level bypass wins at runtime over the synthesized permissions overlay (SR-9.4).
 
+#### Templates
+
+Option resolution follows a three-step chain: per-call argument → template field → SR-1.3 default. A template is consulted only when `template=<name>` is passed explicitly; a bare `spawn_worker(cwd=…)` call with no `template=` argument never reads the templates directory.
+
+**Storage layout.** Templates live at `~/.claude-spawn/templates/<name>.toml`; the filename stem is the template name.
+
+**TOML schema.** The top-level table may contain any of the 11 SR-1.1 option names (every parameter except `template` itself). Scalars (`cwd`, `model`, `thinking`, `tmux_session_name`, `instance_id`, `claude_home`, `claude_settings`) are TOML strings. `claude_args` is a TOML array of strings. Map options (`extra_env`, `claude_status_labels`, `permissions`) are TOML tables. Unknown keys and the `template` key are rejected at load time.
+
+**Worked example** (`~/.claude-spawn/templates/orchestrator.toml`):
+
+```toml
+cwd = "/home/horde/projects/waggle-project/waggle-main"
+model = "sonnet"
+thinking = "high"
+claude_args = ["--verbose"]
+
+[extra_env]
+LOG_LEVEL = "debug"
+
+[permissions]
+allow = ["Bash(git *)"]
+deny = ["Bash(rm -rf *)"]
+```
+
+**Merge rules:**
+
+1. *Scalars and lists* — per-call value replaces the template value wholesale when the per-call argument is not `None`. Example: template sets `model = "sonnet"`; caller passes `model="opus"` → effective model is `"opus"`.
+2. *Maps* (`extra_env`, `claude_status_labels`, `permissions`) — shallow union: template keys form the base; per-call entries are layered on top; per-call wins on any colliding top-level key. A per-call empty `{}` still enters the merge path, so template-only keys are preserved. Example: template `extra_env = {LOG_LEVEL = "info"}` plus per-call `extra_env={"TRACE": "1"}` → `{LOG_LEVEL: "info", TRACE: "1"}`.
+3. *Permissions sub-keys* — because `permissions` is a map, each sub-key (`allow`, `deny`, `ask`) is an independent top-level key in the merge. Example: template `permissions = {allow = ["Bash(git *)"]}` plus per-call `permissions={"deny": ["Bash(rm -rf *)"]}` → effective `{allow: ["Bash(git *)"], deny: ["Bash(rm -rf *)"]}`.
+
+**Errors:**
+
+- `ErrTemplateNotFound` — no `.toml` file exists for the requested name in the templates directory.
+- `ErrTemplateMalformed` — the file was found but failed schema validation (TOML parse error, unknown key, forbidden `template` key, wrong value type, or invalid `thinking` value).
+
 ---
 
 ### `list_spawned_workers`

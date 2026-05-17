@@ -135,3 +135,7 @@ sequenceDiagram
 
     S-->>O: {instance_id, tmux_session_name}
 ```
+
+## See also
+
+- [Option resolution and templates](./spawn_options_and_templates.md)
