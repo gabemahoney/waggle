@@ -69,6 +69,14 @@ class TestListSpawnedWorkersProjection:
             result = sp.list_spawned_workers_impl()
         assert result["workers"][0]["session_name"] == "my-session"
 
+    def test_projects_cwd_from_label(self):
+        r = fake_worker_record("inst-ddd", "working")
+        r["labels"]["claude_spawn_cwd"] = "/work/proj"
+        payload = _make_response(r)
+        with fake_claude_status([(payload, "", 0)]):
+            result = sp.list_spawned_workers_impl()
+        assert result["workers"][0]["cwd"] == "/work/proj"
+
     def test_two_workers_projected(self):
         r1 = fake_worker_record("inst-1", "working")
         r2 = fake_worker_record("inst-2", "waiting")
@@ -84,13 +92,13 @@ class TestListSpawnedWorkersProjection:
         assert "workers" in result
         assert result["workers"] == []
 
-    def test_result_keys_are_instance_id_and_session_name_only(self):
+    def test_result_keys_are_instance_id_session_name_and_cwd(self):
         r = fake_worker_record("inst-ccc", "working")
         payload = _make_response(r)
         with fake_claude_status([(payload, "", 0)]):
             result = sp.list_spawned_workers_impl()
         entry = result["workers"][0]
-        assert set(entry.keys()) == {"instance_id", "session_name"}
+        assert set(entry.keys()) == {"instance_id", "session_name", "cwd"}
 
 
 # ---------------------------------------------------------------------------

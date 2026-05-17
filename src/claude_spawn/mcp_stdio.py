@@ -33,26 +33,59 @@ def _err(operation: str, exc: Exception) -> dict:
 
 @mcp.tool()
 async def spawn_worker(
-    model: str,
-    repo: str,
-    session_name: str | None = None,
+    cwd: str,
+    template: str | None = None,
+    model: str | None = None,
+    thinking: str | None = None,
+    tmux_session_name: str | None = None,
+    instance_id: str | None = None,
+    claude_home: str | None = None,
+    claude_settings: str | None = None,
+    extra_env: dict[str, str] | None = None,
+    claude_status_labels: dict[str, str] | None = None,
+    claude_args: list[str] | None = None,
+    permissions: dict | None = None,
 ) -> dict:
     """Spawn a new Claude worker in a tmux session.
 
     Args:
-        model: Claude model name (e.g. "claude-sonnet-4-5").
-        repo: Absolute path to the working repository.
-        session_name: Optional tmux session name.
-            Defaults to ``spawn-<8-char instance prefix>``.
+        cwd: Absolute path (or ~/...) to the working directory.  Required.
+        template: Reserved for Epic 3 template loading; accepted but ignored.
+        model: Claude model name; inherits Claude Code default when omitted.
+        thinking: Effort level — one of "low", "medium", "high", "xhigh".
+        tmux_session_name: Tmux session name.
+            Defaults to ``<folder>-<8-char instance prefix>``.
+        instance_id: Worker UUID; defaults to a fresh UUIDv4.
+        claude_home: Override HOME for the spawned Claude process.
+        claude_settings: Path to a Claude settings JSON file; must exist.
+        extra_env: Additional environment variables for the session.
+        claude_status_labels: Extra Claude Status labels (bare key, auto-uppercased).
+        claude_args: Extra arguments appended verbatim to the claude invocation.
+        permissions: ``{"allow": [...], "deny": [...], "ask": [...]}`` overlay;
+            merged with claude_settings when both are supplied.
 
     Returns:
-        ``{"instance_id": str, "session_name": str}`` on success or
+        ``{"instance_id": str, "tmux_session_name": str}`` on success or
         an SR-7.1 operation-failed dict on failure.
     """
     import asyncio
 
     try:
-        return await asyncio.to_thread(spawn.spawn_worker_impl, model, repo, session_name)
+        return await asyncio.to_thread(
+            spawn.spawn_worker_impl,
+            cwd=cwd,
+            template=template,
+            model=model,
+            thinking=thinking,
+            tmux_session_name=tmux_session_name,
+            instance_id=instance_id,
+            claude_home=claude_home,
+            claude_settings=claude_settings,
+            extra_env=extra_env,
+            claude_status_labels=claude_status_labels,
+            claude_args=claude_args,
+            permissions=permissions,
+        )
     except Exception as exc:
         return _err("spawn_worker", exc)
 

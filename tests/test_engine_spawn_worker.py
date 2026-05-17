@@ -1,4 +1,4 @@
-"""Unit tests for claude_spawn.spawn.spawn_worker_impl (SR-3.2).
+"""Unit tests for claude_spawn.spawn.spawn_worker_impl (SR-3.2, SR-1.1).
 
 All tmux invocations are patched via claude_spawn.spawn._tmux.
 No real tmux process is forked.  No conftest.py.
@@ -42,52 +42,54 @@ def _patch_tmux(triples):
 
 
 class TestSpawnWorkerShape:
-    def test_returns_instance_id_and_session_name(self):
+    def test_returns_instance_id_and_tmux_session_name(self):
         calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
         try:
-            result = sp.spawn_worker_impl("claude-sonnet-4-5", "/tmp/repo")
+            result = sp.spawn_worker_impl(cwd="/tmp")
         finally:
             patcher.stop()
         assert "instance_id" in result
-        assert "session_name" in result
+        assert "tmux_session_name" in result
+        assert "session_name" not in result, "old 'session_name' key must be absent"
 
     def test_instance_id_is_uuid_format(self):
         import uuid
         calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
         try:
-            result = sp.spawn_worker_impl("claude-sonnet-4-5", "/tmp/repo")
+            result = sp.spawn_worker_impl(cwd="/tmp")
         finally:
             patcher.stop()
         # Must parse without raising
         uuid.UUID(result["instance_id"])
 
-    def test_default_session_name_starts_with_spawn(self):
+    def test_default_session_name_format(self):
+        """Default tmux_session_name is <sanitize(cwd)>-<instance_id[:8]>."""
         calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
         try:
-            result = sp.spawn_worker_impl("claude-sonnet-4-5", "/tmp/repo")
+            result = sp.spawn_worker_impl(cwd="/tmp")
         finally:
             patcher.stop()
-        assert result["session_name"].startswith("spawn-")
+        # With cwd="/tmp", sanitize → "tmp"
+        assert result["tmux_session_name"].startswith("tmp-")
 
     def test_default_session_name_uses_first_8_chars_of_instance_id(self):
+        """tmux_session_name suffix is exactly instance_id[:8] (raw slice)."""
         calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
         try:
-            result = sp.spawn_worker_impl("claude-sonnet-4-5", "/tmp/repo")
+            result = sp.spawn_worker_impl(cwd="/tmp")
         finally:
             patcher.stop()
-        # spawn-<first 8 chars of uuid (without dashes)>
-        iid_nodashes = result["instance_id"].replace("-", "")
-        expected_suffix = iid_nodashes[:8]
-        assert result["session_name"] == f"spawn-{expected_suffix}" or \
-               result["session_name"] == f"spawn-{result['instance_id'][:8]}"
+        iid = result["instance_id"]
+        expected = f"{sp._sanitize_folder_name('/tmp')}-{iid[:8]}"
+        assert result["tmux_session_name"] == expected
 
-    def test_explicit_session_name_is_used(self):
+    def test_explicit_tmux_session_name_is_used(self):
         calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
         try:
-            result = sp.spawn_worker_impl("claude-sonnet-4-5", "/tmp/repo", session_name="my-session")
+            result = sp.spawn_worker_impl(cwd="/tmp", tmux_session_name="my-session")
         finally:
             patcher.stop()
-        assert result["session_name"] == "my-session"
+        assert result["tmux_session_name"] == "my-session"
 
 
 # ---------------------------------------------------------------------------
@@ -96,10 +98,10 @@ class TestSpawnWorkerShape:
 
 
 class TestSpawnWorkerEnvVars:
-    def _run_and_get_new_session_argv(self, model="claude-sonnet-4-5", repo="/tmp/repo", sn=None):
+    def _run_and_get_new_session_argv(self, model=None, repo="/tmp", sn=None):
         calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
         try:
-            sp.spawn_worker_impl(model, repo, sn)
+            sp.spawn_worker_impl(cwd=repo, model=model, tmux_session_name=sn)
         finally:
             patcher.stop()
         # First call is new-session
@@ -158,21 +160,33 @@ class TestSpawnWorkerEnvVars:
         pairs = self._env_pairs(argv)
         assert pairs.get("CLAUDE_STATUS_LABEL_CLAUDE_SPAWN_SESSION_NAME") == "test-sess"
 
-    def test_claude_spawn_model_label_lowercased(self):
+    def test_claude_spawn_model_label_lowercased_when_model_supplied(self):
+        """Model label is present and lowercased when model is supplied."""
         argv = self._run_and_get_new_session_argv(model="Claude-Sonnet-4-5")
         pairs = self._env_pairs(argv)
         assert pairs.get("CLAUDE_STATUS_LABEL_CLAUDE_SPAWN_MODEL") == "claude-sonnet-4-5"
 
-    def test_claude_spawn_cwd_label(self):
-        argv = self._run_and_get_new_session_argv(repo="/srv/myrepo")
+    def test_claude_spawn_model_label_absent_when_model_omitted(self):
+        """Model label is NOT emitted when model is omitted (conditional label)."""
+        argv = self._run_and_get_new_session_argv(model=None)
         pairs = self._env_pairs(argv)
-        assert pairs.get("CLAUDE_STATUS_LABEL_CLAUDE_SPAWN_CWD") == "/srv/myrepo"
+        assert "CLAUDE_STATUS_LABEL_CLAUDE_SPAWN_MODEL" not in pairs
 
-    def test_all_seven_env_vars_present(self):
+    def test_claude_spawn_cwd_label(self):
+        argv = self._run_and_get_new_session_argv(repo="/tmp")
+        pairs = self._env_pairs(argv)
+        assert pairs.get("CLAUDE_STATUS_LABEL_CLAUDE_SPAWN_CWD") == "/tmp"
+
+    def test_all_required_env_vars_present(self):
+        """All unconditional SR-4.2 env vars are in the new-session argv."""
         argv = self._run_and_get_new_session_argv()
         pairs = self._env_pairs(argv)
         for key in sp._REQUIRED_ENV_VARS:
             assert key in pairs, f"missing required env var {key!r}"
+
+    def test_required_env_vars_excludes_model_label(self):
+        """_REQUIRED_ENV_VARS must NOT contain the conditional MODEL label."""
+        assert "CLAUDE_STATUS_LABEL_CLAUDE_SPAWN_MODEL" not in sp._REQUIRED_ENV_VARS
 
 
 # ---------------------------------------------------------------------------
@@ -184,7 +198,7 @@ class TestSpawnWorkerLaunch:
     def test_send_keys_is_second_call(self):
         calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
         try:
-            sp.spawn_worker_impl("sonnet", "/tmp/repo", session_name="s1")
+            sp.spawn_worker_impl(cwd="/tmp", tmux_session_name="s1")
         finally:
             patcher.stop()
         assert calls[1][0] == "send-keys"
@@ -192,7 +206,7 @@ class TestSpawnWorkerLaunch:
     def test_send_keys_targets_window_0_pane_0(self):
         calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
         try:
-            sp.spawn_worker_impl("sonnet", "/tmp/repo", session_name="s1")
+            sp.spawn_worker_impl(cwd="/tmp", tmux_session_name="s1")
         finally:
             patcher.stop()
         argv = calls[1]
@@ -201,21 +215,32 @@ class TestSpawnWorkerLaunch:
         target = argv[idx + 1]
         assert target == "s1:0.0"
 
-    def test_send_keys_sends_claude_model_command(self):
+    def test_send_keys_sends_claude_model_command_when_model_supplied(self):
+        """--model flag appears in send-keys when model is supplied."""
         calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
         try:
-            sp.spawn_worker_impl("Claude-Opus", "/tmp/repo", session_name="s1")
+            sp.spawn_worker_impl(cwd="/tmp", model="opus", tmux_session_name="s1")
         finally:
             patcher.stop()
         argv = calls[1]
-        # The command string should be in argv (before "Enter")
         cmd_parts = " ".join(argv)
-        assert "claude --model claude-opus" in cmd_parts
+        assert "claude" in cmd_parts
+        assert "--model opus" in cmd_parts
+
+    def test_send_keys_no_model_flag_when_model_omitted(self):
+        """--model flag absent from send-keys when model is not supplied."""
+        calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
+        try:
+            sp.spawn_worker_impl(cwd="/tmp", tmux_session_name="s1")
+        finally:
+            patcher.stop()
+        cmd_parts = " ".join(calls[1])
+        assert "--model" not in cmd_parts
 
     def test_send_keys_includes_enter(self):
         calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
         try:
-            sp.spawn_worker_impl("sonnet", "/tmp/repo", session_name="s1")
+            sp.spawn_worker_impl(cwd="/tmp", tmux_session_name="s1")
         finally:
             patcher.stop()
         assert "Enter" in calls[1]
@@ -230,7 +255,7 @@ class TestSpawnWorkerErrors:
     def test_new_session_failure_returns_operation_failed(self):
         calls, patcher = _patch_tmux([("", "session already exists", 1)])
         try:
-            result = sp.spawn_worker_impl("sonnet", "/tmp/repo")
+            result = sp.spawn_worker_impl(cwd="/tmp")
         finally:
             patcher.stop()
         assert result.get("ok") is False
@@ -239,7 +264,7 @@ class TestSpawnWorkerErrors:
     def test_send_keys_failure_returns_operation_failed(self):
         calls, patcher = _patch_tmux([_OK_TRIPLE, ("", "no such session", 1)])
         try:
-            result = sp.spawn_worker_impl("sonnet", "/tmp/repo")
+            result = sp.spawn_worker_impl(cwd="/tmp")
         finally:
             patcher.stop()
         assert result.get("ok") is False
@@ -248,7 +273,7 @@ class TestSpawnWorkerErrors:
     def test_exactly_two_tmux_calls_on_success(self):
         calls, patcher = _patch_tmux([_OK_TRIPLE, _OK_TRIPLE])
         try:
-            sp.spawn_worker_impl("sonnet", "/tmp/repo")
+            sp.spawn_worker_impl(cwd="/tmp")
         finally:
             patcher.stop()
         assert len(calls) == 2
@@ -256,7 +281,42 @@ class TestSpawnWorkerErrors:
     def test_one_tmux_call_on_new_session_failure(self):
         calls, patcher = _patch_tmux([("", "err", 1)])
         try:
-            sp.spawn_worker_impl("sonnet", "/tmp/repo")
+            sp.spawn_worker_impl(cwd="/tmp")
         finally:
             patcher.stop()
         assert len(calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# Old-signature rejection (Epic 1 AC1)
+# ---------------------------------------------------------------------------
+
+
+class TestOldSignatureRejection:
+    def test_impl_rejects_old_positional_shape(self):
+        """spawn_worker_impl("opus", "/tmp", "name") must NOT produce a success.
+
+        With the new 12-option signature the positional slots are
+        (cwd, template, model, ...), so passing the legacy (model, repo,
+        session_name) shape as positionals maps "opus" to cwd, "/tmp" to
+        template, "name" to model.  "opus" is not a valid filesystem path, so
+        the impl returns ErrCwdNotAPath — the old shape is rejected, just via
+        validation rather than TypeError.
+
+        At the FastMCP layer, the tool declaration has cwd as a *required
+        named* parameter; a caller omitting it gets a FastMCP parameter-
+        mismatch error before the impl is reached.  Both layers reject the
+        legacy shape without producing a successful spawn.
+        """
+        result = sp.spawn_worker_impl("opus", "/tmp", "name")
+        # The old positional shape must not succeed (no instance_id key).
+        assert "instance_id" not in result, (
+            "old positional shape must not produce a successful result"
+        )
+        assert result.get("ok") is False
+        # "opus" as cwd fails ErrCwdNotAPath (relative path / no leading slash)
+        assert result.get("err_name") in (
+            "ErrCwdNotAPath",
+            "ErrCwdNotFound",
+            "ErrCwdMissing",
+        ), f"unexpected err_name: {result.get('err_name')!r}"

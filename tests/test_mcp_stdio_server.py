@@ -60,7 +60,7 @@ class TestSpawnWorkerErrorWrapping:
     @pytest.mark.asyncio
     async def test_exception_becomes_operation_failed(self):
         with patch("claude_spawn.spawn.spawn_worker_impl", side_effect=RuntimeError("boom")):
-            result = await ms.spawn_worker.fn("sonnet", "/tmp/repo")
+            result = await ms.spawn_worker.fn(cwd="/tmp")
         assert result["ok"] is False
         assert result["err_name"] == "ErrUnexpected"
         assert "boom" in result["err_description"]
@@ -68,7 +68,7 @@ class TestSpawnWorkerErrorWrapping:
     @pytest.mark.asyncio
     async def test_tmux_failure_propagates_as_operation_failed(self):
         with patch("claude_spawn.spawn._tmux", return_value=("", "session exists", 1)):
-            result = await ms.spawn_worker.fn("sonnet", "/tmp/repo")
+            result = await ms.spawn_worker.fn(cwd="/tmp")
         assert result.get("ok") is False
 
     @pytest.mark.asyncio
@@ -77,9 +77,9 @@ class TestSpawnWorkerErrorWrapping:
             "claude_spawn.spawn._tmux",
             return_value=("", "", 0),
         ):
-            result = await ms.spawn_worker.fn("sonnet", "/tmp/repo", "my-sess")
+            result = await ms.spawn_worker.fn(cwd="/tmp", tmux_session_name="my-sess")
         assert "instance_id" in result
-        assert result["session_name"] == "my-sess"
+        assert result["tmux_session_name"] == "my-sess"
 
 
 # ---------------------------------------------------------------------------
