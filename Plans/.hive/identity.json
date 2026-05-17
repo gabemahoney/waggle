@@ -1,0 +1,20 @@
+{
+  "normalized_name": "plans",
+  "display_name": "Plans",
+  "created_at": "2026-05-11T20:25:25.976065",
+  "version": "0.1",
+  "child_tiers": {
+    "t1": [
+      "Epic",
+      "Epics"
+    ],
+    "t2": [
+      "Task",
+      "Tasks"
+    ],
+    "t3": [
+      "Subtask",
+      "Subtasks"
+    ]
+  }
+}
