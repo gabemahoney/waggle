@@ -117,23 +117,28 @@ def _extract_settings_path(send_keys_argv: list[str]) -> str | None:
 def _extract_settings_value(send_keys_argv: list[str]) -> tuple:
     """Extract the --settings value from a send-keys argv list.
 
-    Handles both shell-quoted inline JSON and plain file paths.
+    Re-tokenises the joined command via ``shlex.split`` so every quoting form
+    ``shlex.quote`` can produce is handled uniformly — including the
+    ``'foo'"'"'bar'`` shape that emerges when the quoted string itself
+    contains a single quote (e.g. a permission pattern like ``Bash(echo 'x')``).
 
     Returns:
         (None, None)                     — no --settings flag present
-        (parsed_dict, "inline_json")     — shell-quoted inline JSON was found
-        (path_str, "path")               — a plain file path was found
+        (parsed_dict, "inline_json")     — value parses as JSON (synthesised overlay)
+        (path_str, "path")               — value does not parse as JSON (caller's path)
     """
-    cmd = " ".join(send_keys_argv)
-    # Match either a single-quoted shell string (may contain spaces) or a bare token.
-    m = re.search(r"--settings(?:=|\s+)('(?:[^']*)'|\S+)", cmd)
-    if m is None:
+    tokens = shlex.split(" ".join(send_keys_argv))
+    try:
+        idx = tokens.index("--settings")
+    except ValueError:
         return None, None
-    raw = m.group(1)
-    if raw.startswith("'"):
-        unquoted = shlex.split(raw)[0]
-        return json.loads(unquoted), "inline_json"
-    return raw, "path"
+    if idx + 1 >= len(tokens):
+        return None, None
+    value = tokens[idx + 1]
+    try:
+        return json.loads(value), "inline_json"
+    except (json.JSONDecodeError, ValueError):
+        return value, "path"
 
 
 # ---------------------------------------------------------------------------
@@ -570,6 +575,18 @@ class TestSettingsOverlay:
         assert kind == "inline_json"
         assert value == {"permissions": perms}, (
             f"round-trip must preserve permissions with embedded quotes: got {value!r}"
+        )
+
+    def test_shell_quoting_roundtrip_with_embedded_single_quote(self):
+        """Permission patterns containing a single quote survive shlex.quote's
+        ``'foo'"'"'bar'`` complex form."""
+        perms = {"allow": ["Bash(echo 'hi mom')"]}
+        calls, result = self._run(cwd="/tmp", permissions=perms)
+
+        value, kind = _extract_settings_value(calls[1])
+        assert kind == "inline_json"
+        assert value == {"permissions": perms}, (
+            f"round-trip must preserve permissions with embedded single quotes: got {value!r}"
         )
 
     def test_err_claude_settings_malformed_bad_json(self):
