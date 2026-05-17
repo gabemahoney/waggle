@@ -147,6 +147,66 @@ deny = ["Bash(rm -rf *)"]
 
 ---
 
+### `list_templates`
+
+List all saved Claude Spawn templates.
+
+Takes no parameters.
+
+Returns `{"templates": [...], "skipped": [...]}`. Missing templates directory
+returns empty lists — operation-success, not an error.
+
+**`templates[]` entries** — one per valid template file:
+
+| Field | Description |
+|-------|-------------|
+| `name` | Filename stem (e.g. `orchestrator` for `orchestrator.toml`) |
+| `path` | Absolute path to the `.toml` file on disk |
+| `options` | Resolved option map parsed from the file |
+
+**`skipped[]` entries** — one per file that could not be loaded:
+
+| Field | Description |
+|-------|-------------|
+| `path` | Absolute path to the file |
+| `err_name` | Always `ErrTemplateMalformed` |
+| `err_description` | Parser or schema detail naming the specific failure |
+
+**Worked example** — templates directory contains `orchestrator.toml` (valid)
+and `broken.toml` (malformed):
+
+```json
+{
+  "templates": [
+    {
+      "name": "orchestrator",
+      "path": "/home/horde/.claude-spawn/templates/orchestrator.toml",
+      "options": {
+        "cwd": "/home/horde/projects/waggle-project/waggle-main",
+        "model": "sonnet",
+        "thinking": "high",
+        "claude_args": ["--verbose"],
+        "extra_env": {"LOG_LEVEL": "debug"},
+        "permissions": {"allow": ["Bash(git *)"], "deny": ["Bash(rm -rf *)"]}
+      }
+    }
+  ],
+  "skipped": [
+    {
+      "path": "/home/horde/.claude-spawn/templates/broken.toml",
+      "err_name": "ErrTemplateMalformed",
+      "err_description": "/home/horde/.claude-spawn/templates/broken.toml: 'ultra' is not one of low, medium, high, xhigh"
+    }
+  ]
+}
+```
+
+`list_templates` reads the templates directory on disk. `list_spawned_workers`
+queries Claude Status's `instances` table. The two tools have independent data
+sources and return different shapes.
+
+---
+
 ### `list_spawned_workers`
 
 List all Claude Spawn-managed workers visible via Claude Status.

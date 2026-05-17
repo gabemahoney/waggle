@@ -132,6 +132,46 @@ caching and no background scan. The templates directory is only read when
 `spawn_worker` is called with an explicit `template=<name>` argument; a call
 without `template=` never touches the directory.
 
+## Discovery surface: list_templates
+
+`list_templates` is the MCP tool that wraps the loader's enumerate-all entry
+point (`enumerate_templates()`). It provides callers a single call to inspect
+every template file in the templates directory without invoking `spawn_worker`.
+
+### Data flow
+
+```
+list_templates (MCP tool)
+  └─ list_templates_impl (templates.py)
+       └─ enumerate_templates() — generator
+            └─ _templates_dir() / _read_template_file() — filesystem seams
+                 for each .toml file: yield (name, path, parsed_options_or_error)
+```
+
+`list_templates_impl` iterates `enumerate_templates()` and routes each
+`(name, path, parsed_or_error)` tuple into one of two output channels:
+
+| Result from loader | Output channel | Fields projected |
+|--------------------|---------------|-----------------|
+| Valid (parse + schema pass) | `templates[]` | `name`, `path`, `options` (the parsed option-map) |
+| Malformed (parse or schema error) | `skipped[]` | `path`, `err_name` (`ErrTemplateMalformed`), `err_description` |
+
+A single malformed file does not abort the scan — iteration continues and the
+bad file lands in `skipped[]` while remaining valid files appear in
+`templates[]`.
+
+### Missing templates directory
+
+If the templates directory is absent, `enumerate_templates()` yields zero
+entries (no error raised). `list_templates_impl` propagates this as empty
+`templates[]` and `skipped[]` lists — operation-success, not a failure.
+
+### Distinction from `list_spawned_workers`
+
+`list_templates` reads `~/.claude-spawn/templates/` on disk. `list_spawned_workers`
+queries Claude Status's `instances` table. The two tools have independent data
+sources, independent scopes, and return different shapes.
+
 ## Errors
 
 | err_name | Condition |
