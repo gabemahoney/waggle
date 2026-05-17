@@ -22,7 +22,7 @@ WORKER_WORKING = {
         "claude_spawn_owned": "1",
         "claude_spawn_session_name": "worker-abc",
         "claude_spawn_model": "claude-opus-4-5",
-        "claude_spawn_repo": "/work/repo",
+        "claude_spawn_cwd": "/work/repo",
     },
     "pending": None,
 }
@@ -40,7 +40,7 @@ WORKER_ASK_USER_SINGLE = {
         "claude_spawn_owned": "1",
         "claude_spawn_session_name": "worker-def",
         "claude_spawn_model": "claude-opus-4-5",
-        "claude_spawn_repo": "/work/repo",
+        "claude_spawn_cwd": "/work/repo",
     },
     "pending": {
         "kind": "ask_user_question",
@@ -73,7 +73,7 @@ WORKER_ASK_USER_MULTI = {
         "claude_spawn_owned": "1",
         "claude_spawn_session_name": "worker-ghi",
         "claude_spawn_model": "claude-opus-4-5",
-        "claude_spawn_repo": "/work/repo",
+        "claude_spawn_cwd": "/work/repo",
     },
     "pending": {
         "kind": "ask_user_question",
@@ -111,7 +111,7 @@ WORKER_ENDED = {
         "claude_spawn_owned": "1",
         "claude_spawn_session_name": "worker-jkl",
         "claude_spawn_model": "claude-opus-4-5",
-        "claude_spawn_repo": "/work/repo",
+        "claude_spawn_cwd": "/work/repo",
     },
     "pending": None,
 }

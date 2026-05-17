@@ -163,10 +163,10 @@ class TestSpawnWorkerEnvVars:
         pairs = self._env_pairs(argv)
         assert pairs.get("CLAUDE_STATUS_LABEL_CLAUDE_SPAWN_MODEL") == "claude-sonnet-4-5"
 
-    def test_claude_spawn_repo_label(self):
+    def test_claude_spawn_cwd_label(self):
         argv = self._run_and_get_new_session_argv(repo="/srv/myrepo")
         pairs = self._env_pairs(argv)
-        assert pairs.get("CLAUDE_STATUS_LABEL_CLAUDE_SPAWN_REPO") == "/srv/myrepo"
+        assert pairs.get("CLAUDE_STATUS_LABEL_CLAUDE_SPAWN_CWD") == "/srv/myrepo"
 
     def test_all_seven_env_vars_present(self):
         argv = self._run_and_get_new_session_argv()

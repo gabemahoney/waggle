@@ -89,7 +89,7 @@ _DEFAULT_LABELS = {
     "claude_spawn_owned": "1",
     "claude_spawn_session_name": "worker-default",
     "claude_spawn_model": "claude-opus-4-5",
-    "claude_spawn_repo": "/work/repo",
+    "claude_spawn_cwd": "/work/repo",
 }
 
 _VALID_STATUSES = frozenset(
@@ -102,17 +102,22 @@ def fake_worker_record(
     status: str,
     labels: dict | None = None,
     pending: dict | None = None,
+    cwd: str | None = None,
 ) -> dict:
     """Return a Worker record dict matching the claude-status contract 1.0.0.
 
     ``status`` must be one of the six documented values.
     ``labels`` defaults to a minimal claude_spawn-owned set when not supplied.
     ``pending`` defaults to ``None``.
+    ``cwd`` overrides the ``claude_spawn_cwd`` label when supplied.
     """
     if status not in _VALID_STATUSES:
         raise ValueError(
             f"fake_worker_record: status={status!r} not in {sorted(_VALID_STATUSES)}"
         )
+    merged_labels = dict(_DEFAULT_LABELS) if labels is None else dict(labels)
+    if cwd is not None:
+        merged_labels["claude_spawn_cwd"] = cwd
     return {
         "instance_id": instance_id,
         "status": status,
@@ -122,7 +127,7 @@ def fake_worker_record(
         "started_at": "2026-05-14T10:00:00.000000000Z",
         "last_seen_at": "2026-05-14T10:00:00.000000000Z",
         "ended_at": None,
-        "labels": dict(_DEFAULT_LABELS) if labels is None else dict(labels),
+        "labels": merged_labels,
         "pending": pending,
     }
 
