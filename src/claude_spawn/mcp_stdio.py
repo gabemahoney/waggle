@@ -200,6 +200,31 @@ async def list_spawned_workers() -> dict:
         return _err("list_spawned_workers", exc)
 
 
+@mcp.tool()
+async def list_templates() -> dict:
+    """List saved Claude Spawn templates.
+
+    Reads every .toml file under ~/.claude-spawn/templates/ (or the
+    directory's seam in tests). Valid templates are returned under
+    ``templates[]``; malformed files surface under ``skipped[]`` so a
+    single bad file does not hide the rest.
+
+    Returns:
+        ``{"templates": [{"name", "path", "options"}, ...],
+           "skipped": [{"path", "err_name", "err_description"}, ...]}``
+        on success or an SR-7.1 operation-failed dict on failure.
+        Missing templates directory is operation-success with both
+        lists empty (NOT an error).
+    """
+    import asyncio
+
+    try:
+        from claude_spawn import templates as templates_module
+        return await asyncio.to_thread(templates_module.list_templates_impl)
+    except Exception as exc:
+        return _err("list_templates", exc)
+
+
 def run() -> None:
     """Launch the stdio MCP server.  Blocks until stdin closes."""
     mcp.run()

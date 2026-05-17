@@ -23,6 +23,7 @@ from tests.helpers import fake_claude_status, fake_workers_response
 _EXPECTED_TOOLS = {
     "spawn_worker",
     "list_spawned_workers",
+    "list_templates",
     "send_input",
     "get_output",
     "terminate_worker",
@@ -31,9 +32,9 @@ _EXPECTED_TOOLS = {
 
 
 class TestToolRegistration:
-    def test_exactly_six_tools_registered(self):
+    def test_exactly_seven_tools_registered(self):
         tools = ms.mcp._tool_manager._tools
-        assert len(tools) == 6, f"expected 6 tools, got {len(tools)}: {list(tools)}"
+        assert len(tools) == 7, f"expected 7 tools, got {len(tools)}: {list(tools)}"
 
     def test_all_expected_tools_registered(self):
         tools = ms.mcp._tool_manager._tools
@@ -117,6 +118,22 @@ class TestListSpawnedWorkersErrorWrapping:
             result = await ms.list_spawned_workers.fn()
         assert "workers" in result
         assert result["workers"][0]["instance_id"] == "inst-xyz"
+
+
+# ---------------------------------------------------------------------------
+# SR-7.1 error wrapping — list_templates
+# ---------------------------------------------------------------------------
+
+
+class TestListTemplatesErrorWrapping:
+    @pytest.mark.asyncio
+    async def test_exception_becomes_operation_failed(self):
+        with patch("claude_spawn.templates.list_templates_impl", side_effect=RuntimeError("crash")):
+            result = await ms.list_templates.fn()
+        assert result["ok"] is False
+        assert result["err_name"] == "ErrUnexpected"
+        assert result["operation"] == "list_templates"
+        assert "crash" in result["err_description"]
 
 
 # ---------------------------------------------------------------------------

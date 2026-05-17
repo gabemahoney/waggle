@@ -277,3 +277,36 @@ def enumerate_templates() -> Generator[tuple[str, str, dict], None, None]:
             "operation": "load_template",
             "load_template": data,
         }
+
+
+def list_templates_impl() -> dict:
+    """Return all templates as a ``{"templates": [...], "skipped": [...]}`` dict.
+
+    Iterates ``enumerate_templates()`` and projects each entry into one of two
+    buckets:
+
+    - ``templates[]`` — valid entries, each with ``name``, ``path``, and
+      ``options`` (the parsed option-map, i.e. the inner dict from
+      ``load_template``).
+    - ``skipped[]`` — malformed entries, each with ``path``, ``err_name``,
+      and ``err_description``.
+
+    Missing templates directory produces empty lists (operation-success, not an
+    error — the loader already handles directory absence as zero entries).
+    """
+    templates = []
+    skipped = []
+    for name, path, parsed_or_err in enumerate_templates():
+        if parsed_or_err.get("ok") is False:
+            skipped.append({
+                "path": path,
+                "err_name": parsed_or_err["err_name"],
+                "err_description": parsed_or_err["err_description"],
+            })
+        else:
+            templates.append({
+                "name": name,
+                "path": path,
+                "options": parsed_or_err["load_template"],
+            })
+    return {"templates": templates, "skipped": skipped}
