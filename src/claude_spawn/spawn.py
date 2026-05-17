@@ -9,6 +9,8 @@ No module-level side effects.  Import is inert.
 
 from __future__ import annotations
 
+import os
+import re
 import subprocess
 import sys
 import uuid
@@ -34,6 +36,24 @@ def _tmux(argv: list[str]) -> tuple[str, str, int]:
         timeout=_TMUX_TIMEOUT,
     )
     return result.stdout, result.stderr, result.returncode
+
+
+# ---------------------------------------------------------------------------
+# Folder-name sanitiser (SR-3.2)
+# ---------------------------------------------------------------------------
+
+_SANITIZE_RE = re.compile(r"[^A-Za-z0-9_-]")
+
+
+def _sanitize_folder_name(path: str) -> str:
+    """Return a tmux-safe name derived from the final segment of *path* (SR-3.2)."""
+    segment = os.path.basename(os.path.normpath(path))
+    if not segment or segment == ".":
+        return "root"
+    sanitized = _SANITIZE_RE.sub("-", segment)
+    if not sanitized or all(c == "-" for c in sanitized):
+        return "root"
+    return sanitized
 
 
 # ---------------------------------------------------------------------------
