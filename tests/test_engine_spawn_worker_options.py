@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import tempfile
 from unittest.mock import patch
 
@@ -102,10 +103,37 @@ def _env_pairs(argv: list[str]) -> dict[str, str]:
 
 
 def _extract_settings_path(send_keys_argv: list[str]) -> str | None:
-    """Extract the --settings path from a send-keys argv list, or None if absent."""
+    """Extract the --settings path from a send-keys argv list, or None if absent.
+
+    NOTE: for inline JSON (shell-quoted) values use _extract_settings_value instead.
+    This helper is kept for tests that only need to check for absence or compare a
+    plain path (e.g. claude_settings-only pass-through).
+    """
     cmd = " ".join(send_keys_argv)
     m = re.search(r"--settings(?:=|\s+)(\S+)", cmd)
     return m.group(1) if m else None
+
+
+def _extract_settings_value(send_keys_argv: list[str]) -> tuple:
+    """Extract the --settings value from a send-keys argv list.
+
+    Handles both shell-quoted inline JSON and plain file paths.
+
+    Returns:
+        (None, None)                     — no --settings flag present
+        (parsed_dict, "inline_json")     — shell-quoted inline JSON was found
+        (path_str, "path")               — a plain file path was found
+    """
+    cmd = " ".join(send_keys_argv)
+    # Match either a single-quoted shell string (may contain spaces) or a bare token.
+    m = re.search(r"--settings(?:=|\s+)('(?:[^']*)'|\S+)", cmd)
+    if m is None:
+        return None, None
+    raw = m.group(1)
+    if raw.startswith("'"):
+        unquoted = shlex.split(raw)[0]
+        return json.loads(unquoted), "inline_json"
+    return raw, "path"
 
 
 # ---------------------------------------------------------------------------
@@ -434,15 +462,15 @@ class TestSettingsOverlay:
         calls, result = self._run(cwd="/tmp")
         assert _extract_settings_path(calls[1]) is None
 
-    def test_permissions_only_creates_settings_file(self):
-        """permissions-only: synthesized file contains exact permissions blob."""
+    def test_permissions_only_synthesizes_overlay(self):
+        """permissions-only: --settings carries shell-quoted inline JSON with exact permissions blob."""
         perms = {"allow": ["Bash"], "deny": ["WebFetch"]}
         calls, result = self._run(cwd="/tmp", permissions=perms)
-        path = _extract_settings_path(calls[1])
-        assert path is not None, "--settings flag must be present"
-        with open(path) as f:
-            content = json.load(f)
-        assert content == {"permissions": perms}
+        value, kind = _extract_settings_value(calls[1])
+        assert kind == "inline_json", (
+            f"--settings must carry inline JSON, got kind={kind!r}, value={value!r}"
+        )
+        assert value == {"permissions": perms}
 
     def test_permissions_empty_map_no_settings_flag(self):
         """Empty permissions map is treated as 'not supplied' — no --settings."""
@@ -464,7 +492,7 @@ class TestSettingsOverlay:
             os.unlink(caller_path)
 
     def test_composite_permissions_win_on_allow(self):
-        """Composite: per-call permissions.allow overrides file's allow."""
+        """Composite: per-call permissions.allow overrides file's allow; result is inline JSON."""
         base = {"permissions": {"allow": ["X"]}, "theme": "dark"}
         with tempfile.NamedTemporaryFile(
             suffix=".json", mode="w", delete=False
@@ -477,20 +505,17 @@ class TestSettingsOverlay:
                 claude_settings=caller_path,
                 permissions={"allow": ["Y"]},
             )
-            path = _extract_settings_path(calls[1])
-            assert path is not None
-            assert path != caller_path, "composite must write a new file"
-            with open(path) as f:
-                content = json.load(f)
+            value, kind = _extract_settings_value(calls[1])
+            assert kind == "inline_json", "--settings must be inline JSON for composite case"
             # Per-call allow wins
-            assert content["permissions"]["allow"] == ["Y"]
+            assert value["permissions"]["allow"] == ["Y"]
             # Unrelated top-level key passes through unchanged
-            assert content.get("theme") == "dark"
+            assert value.get("theme") == "dark"
         finally:
             os.unlink(caller_path)
 
     def test_composite_preserves_file_deny_when_per_call_only_has_allow(self):
-        """Composite: file deny preserved when per-call supplies allow only."""
+        """Composite: file deny preserved when per-call supplies allow only; result is inline JSON."""
         base = {"permissions": {"allow": ["OldAllow"], "deny": ["D"]}}
         with tempfile.NamedTemporaryFile(
             suffix=".json", mode="w", delete=False
@@ -503,14 +528,49 @@ class TestSettingsOverlay:
                 claude_settings=caller_path,
                 permissions={"allow": ["A"]},
             )
-            path = _extract_settings_path(calls[1])
-            assert path is not None
-            with open(path) as f:
-                content = json.load(f)
-            assert content["permissions"]["allow"] == ["A"]
-            assert content["permissions"]["deny"] == ["D"]
+            value, kind = _extract_settings_value(calls[1])
+            assert kind == "inline_json", "--settings must be inline JSON for composite case"
+            assert value["permissions"]["allow"] == ["A"]
+            assert value["permissions"]["deny"] == ["D"]
         finally:
             os.unlink(caller_path)
+
+    def test_no_tempfile_created_for_permissions_only(self):
+        """Regression (b.evz): spawn with permissions must NOT write any claude-spawn-settings-*.json."""
+        import glob as _glob
+        tmp_dir = tempfile.gettempdir()
+        pattern = os.path.join(tmp_dir, "claude-spawn-settings-*.json")
+        before = set(_glob.glob(pattern))
+
+        perms = {"allow": ["Bash"]}
+        _calls, _result = self._run(cwd="/tmp", permissions=perms)
+
+        after = set(_glob.glob(pattern))
+        new_files = after - before
+        assert new_files == set(), (
+            f"spawn_worker_impl must not write settings tempfiles; found: {new_files}"
+        )
+
+    def test_shell_quoting_roundtrip_with_spaces_and_embedded_quotes(self):
+        """Shell-quoted inline JSON survives round-trip for permissions containing spaces and embedded quotes."""
+        perms = {"allow": ['Bash(echo "hi mom")']}
+        calls, result = self._run(cwd="/tmp", permissions=perms)
+
+        # The raw --settings token in the send-keys command must be shell-quoted
+        cmd = " ".join(calls[1])
+        m = re.search(r"--settings(?:=|\s+)('(?:[^']*)'|\S+)", cmd)
+        assert m is not None, "--settings flag must be present"
+        raw = m.group(1)
+        assert raw.startswith("'"), (
+            f"value must be shell-quoted (starts with '): got {raw!r}"
+        )
+
+        # Unquoting and JSON-parsing must recover the original permissions intact
+        value, kind = _extract_settings_value(calls[1])
+        assert kind == "inline_json"
+        assert value == {"permissions": perms}, (
+            f"round-trip must preserve permissions with embedded quotes: got {value!r}"
+        )
 
     def test_err_claude_settings_malformed_bad_json(self):
         """Malformed JSON in claude_settings → ErrClaudeSettingsMalformed, no tmux calls."""
@@ -932,11 +992,10 @@ class TestTemplateIntegration:
             finally:
                 patcher.stop()
         assert result.get("ok") is not False, f"spawn failed: {result}"
-        settings_path = _extract_settings_path(calls[1])
-        assert settings_path is not None, "--settings must be present when permissions used"
-        with open(settings_path) as fh:
-            content = json.load(fh)
-        resolved_perms = content.get("permissions", {})
+        value, kind = _extract_settings_value(calls[1])
+        assert value is not None, "--settings must be present when permissions used"
+        assert kind == "inline_json", "--settings must carry inline JSON when permissions synthesized"
+        resolved_perms = value.get("permissions", {})
         # Per-call allow replaces template allow wholesale
         assert resolved_perms.get("allow") == ["A"], (
             f"allow should be ['A'] (per-call wins), got {resolved_perms.get('allow')!r}"

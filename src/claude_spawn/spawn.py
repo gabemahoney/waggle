@@ -14,7 +14,7 @@ import os
 import re
 import subprocess
 import sys
-import tempfile
+import shlex
 import time
 import uuid
 
@@ -170,11 +170,16 @@ def _err_spawn(err_name: str, err_description: str) -> dict:
     }
 
 
-def _resolve_settings_path(
+def _resolve_settings_value(
     permissions: dict,
     claude_settings: str | None,
 ) -> str | None:
-    """SR-4.5: synthesise the effective --settings path, or return None."""
+    """SR-4.5: return the value to pass after --settings, or None.
+
+    Returns a shell-quoted inline JSON string for synthesised settings,
+    the original path for caller-supplied settings (no permissions to merge),
+    or None when neither is provided.
+    """
     has_perms = bool(permissions)
     has_settings = bool(claude_settings)
 
@@ -183,11 +188,7 @@ def _resolve_settings_path(
 
     if has_perms and not has_settings:
         data = {"permissions": permissions}
-        with tempfile.NamedTemporaryFile(
-            prefix="claude-spawn-settings-", suffix=".json", delete=False, mode="w"
-        ) as f:
-            json.dump(data, f)
-            return f.name
+        return shlex.quote(json.dumps(data, separators=(",", ":")))
 
     if has_settings and not has_perms:
         return claude_settings
@@ -221,11 +222,7 @@ def _resolve_settings_path(
             base_perms[key] = permissions[key]
     base["permissions"] = base_perms
 
-    with tempfile.NamedTemporaryFile(
-        prefix="claude-spawn-settings-", suffix=".json", delete=False, mode="w"
-    ) as f:
-        json.dump(base, f)
-        return f.name
+    return shlex.quote(json.dumps(base, separators=(",", ":")))
 
 
 def spawn_worker_impl(
@@ -394,9 +391,9 @@ def spawn_worker_impl(
         tmux_session_name = f"{_sanitize_folder_name(cwd)}-{instance_id[:8]}"
 
     # --- SR-4.5 settings overlay synthesis ---
-    effective_settings_path = _resolve_settings_path(permissions, claude_settings)
-    if isinstance(effective_settings_path, dict):
-        return effective_settings_path  # ErrClaudeSettingsMalformed
+    effective_settings_value = _resolve_settings_value(permissions, claude_settings)
+    if isinstance(effective_settings_value, dict):
+        return effective_settings_value  # ErrClaudeSettingsMalformed
 
     # --- SR-4.1–4.4 tmux launch composition ---
 
@@ -446,8 +443,8 @@ def spawn_worker_impl(
         cmd_parts += ["--model", model]
     if thinking:
         cmd_parts += ["--effort", thinking]
-    if effective_settings_path:
-        cmd_parts += ["--settings", effective_settings_path]
+    if effective_settings_value:
+        cmd_parts += ["--settings", effective_settings_value]
     cmd_parts += claude_args
 
     _stdout2, stderr2, rc2 = _tmux(

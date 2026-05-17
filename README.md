@@ -95,7 +95,7 @@ The CLI `--settings <path>` overlay wins above all four layers. Claude Spawn opt
 
 - `claude_home` — rewrites `HOME` for the worker process, redirecting layer 2 to a different config tree.
 - `claude_settings` — supplies the path passed via `--settings`, the highest-precedence overlay.
-- `permissions` — realized inside that overlay. When no `claude_settings` is supplied, Claude Spawn synthesizes a minimal overlay containing just the `permissions` block. When both `claude_settings` and `permissions` are supplied, Claude Spawn writes a composite temp file with first-class `permissions.allow`/`deny`/`ask` layered on top of the caller's file (those three keys win; other top-level keys pass through unchanged).
+- `permissions` — realized inside that overlay. When `permissions` is supplied without `claude_settings`, Claude Spawn synthesizes a minimal `{"permissions": ...}` JSON object and passes it inline to `claude --settings <json>`. When both `claude_settings` and `permissions` are supplied, Claude Spawn reads the file, merges per-call `permissions.allow`/`deny`/`ask` on top of the file's permissions (first-class wins), serializes the result, and passes it inline. The caller's `claude_settings` file is never modified; no tempfile is created.
 
 Passing `--dangerously-skip-permissions` via `claude_args` alongside a non-empty `permissions` map is not an error; Claude Code's CLI-level bypass wins at runtime over the synthesized permissions overlay (SR-9.4).
 

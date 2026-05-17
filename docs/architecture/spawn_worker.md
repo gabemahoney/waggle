@@ -74,14 +74,14 @@ If `claude_home` is set, `HOME=<claude_home>` is also injected.
 ### Command-line composition (SR-4.4)
 
 ```
-claude [--model <m>] [--effort <l>] [--settings <path>] [claude_args ...]
+claude [--model <m>] [--effort <l>] [--settings <value>] [claude_args ...]
 ```
 
 Flags are emitted only when their resolved option is set:
 
 - `--model <m>` — emitted when `model` is supplied.
 - `--effort <l>` — emitted when `thinking` is supplied.
-- `--settings <path>` — emitted when an effective overlay path is resolved (see Settings Overlay).
+- `--settings <value>` — emitted when an effective settings value is resolved (see Settings Overlay). `<value>` is either the caller's file path (path-through case) or a shell-quoted inline JSON string (synthesized cases).
 
 The composed command string is sent via `tmux send-keys ... Enter`.
 
@@ -91,9 +91,9 @@ Three synthesis paths determine the `--settings` path passed to `claude`:
 
 | Inputs | Result |
 |--------|--------|
-| `permissions` non-empty, no `claude_settings` | Claude Spawn writes a synthesized temp JSON containing just the `permissions` block; passes it via `--settings` |
-| `claude_settings` supplied, `permissions` empty | Caller's file passed verbatim via `--settings` |
-| Both `claude_settings` and `permissions` supplied | Claude Spawn writes a composite temp file: caller's file keys pass through; first-class `permissions.allow`/`deny`/`ask` win on those three keys |
+| `permissions` non-empty, no `claude_settings` | Claude Spawn serializes `{"permissions": ...}` to a shell-quoted inline JSON string and passes it via `--settings <json>`; no tempfile is created |
+| `claude_settings` supplied, `permissions` empty | Caller's file path passed verbatim via `--settings` |
+| Both `claude_settings` and `permissions` supplied | Claude Spawn reads the file, merges per-call `permissions.allow`/`deny`/`ask` on top (first-class wins), serializes the result to a shell-quoted inline JSON string, and passes it via `--settings <json>`; the caller's file is not modified and no tempfile is created |
 | Neither supplied | No `--settings` flag |
 
 Template loading extends this flow when `template=<name>` is supplied — see [`spawn_options_and_templates.md`](./spawn_options_and_templates.md) for the option-resolution chain and merge semantics.
@@ -141,7 +141,7 @@ sequenceDiagram
         S-->>O: {ok: false, err_name: "ErrTmuxSessionCreate"}
     end
 
-    S->>TX: send-keys -t <name>:0.0 "claude [--model <m>] [--effort <l>] [--settings <path>] [claude_args...]" Enter
+    S->>TX: send-keys -t <name>:0.0 "claude [--model <m>] [--effort <l>] [--settings <value>] [claude_args...]" Enter
     alt tmux error
         S-->>O: {ok: false, err_name: "ErrTmuxSendKeys"}
     end
