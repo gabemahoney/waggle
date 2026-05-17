@@ -207,6 +207,51 @@ sources and return different shapes.
 
 ---
 
+### `write_template`
+
+Author or overwrite a Claude Spawn template file.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `name` | `str` | **Yes** | — | Template name (filename stem) |
+| `options` | `dict` | **Yes** | — | Option map to write; keys are SR-1.1 option names |
+| `force` | `bool` | No | `False` | If `True`, overwrite an existing template atomically |
+
+**Returns on success:** `{"ok": true, "path": <abs path>, "options": <normalized options>}`
+
+`path` is the canonical absolute path to the written file (e.g. `~/.claude-spawn/templates/<name>.toml` fully expanded). `options` echoes the option map that was written, confirming what passed validation.
+
+**`force` flag:**
+
+- Without `force` (default `False`): if a template named `<name>` already exists, `write_template` returns `ErrTemplateExists` and leaves the existing file unchanged.
+- With `force=True`: the existing file is overwritten using a sibling temp file and `os.replace`. Crash safety is preserved — a crash between the temp write and the rename leaves the canonical file untouched.
+
+**Error responses:**
+
+```jsonc
+// ErrTemplateNameUnsafe — name fails path-safety checks (path separator,
+// leading dot, ".." substring, or empty)
+{"ok": false, "operation": "write_template", "err_name": "ErrTemplateNameUnsafe",
+ "err_description": "name must not contain '/'"}
+
+// ErrTemplateOptionsInvalid — options dict fails SR-6.4 schema validation
+{"ok": false, "operation": "write_template", "err_name": "ErrTemplateOptionsInvalid",
+ "err_description": "thinking must be one of low, medium, high, xhigh; got 'ultra'"}
+
+// ErrTemplateExists — file exists and force=False
+{"ok": false, "operation": "write_template", "err_name": "ErrTemplateExists",
+ "err_description": "template 'orch' already exists at '/home/horde/.claude-spawn/templates/orch.toml'; pass force=True to overwrite"}
+
+// ErrUnexpected — unexpected exception surfaced by the FastMCP wrapper;
+// err_description is str(exc)
+{"ok": false, "operation": "write_template", "err_name": "ErrUnexpected",
+ "err_description": "<exception message>"}
+```
+
+MCP authoring or hand-edit; the CLI surface added in a later Epic shares the same impl.
+
+---
+
 ### `list_spawned_workers`
 
 List all Claude Spawn-managed workers visible via Claude Status.

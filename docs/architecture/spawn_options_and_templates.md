@@ -172,6 +172,64 @@ entries (no error raised). `list_templates_impl` propagates this as empty
 queries Claude Status's `instances` table. The two tools have independent data
 sources, independent scopes, and return different shapes.
 
+## Template authoring: write_template
+
+`write_template` is the MCP tool for creating and overwriting template files
+without leaving the MCP session. It delegates to `write_template_impl` in
+`templates.py`.
+
+### Full write path
+
+The implementation follows six steps in order:
+
+1. **Name safety (SR-7.4)** — The name is rejected as `ErrTemplateNameUnsafe`
+   if it is empty, contains a path separator (`/` or `\`), equals `.` or `..`,
+   contains `..` as a substring, or starts with `.`.
+
+2. **Options validation (SR-6.4)** — `_validate()` is called on the supplied
+   options dict, reusing the same helper used by the loader. Failures surface as
+   `ErrTemplateOptionsInvalid` rather than `ErrTemplateMalformed`, distinguishing
+   a write-side caller error from a read-side bad-file diagnosis.
+
+3. **Path resolution + defensive realpath check** — The canonical path
+   `<tdir>/<name>.toml` is constructed, then `os.path.realpath` is called on
+   its parent and compared to `os.path.realpath(tdir)`. Any mismatch triggers
+   `ErrTemplateNameUnsafe`. This belt-and-suspenders guard catches escape attempts
+   that the static name checks might miss.
+
+4. **Directory auto-creation** — `os.makedirs(tdir, exist_ok=True)` ensures the
+   templates directory exists before the write is attempted.
+
+5. **Collision handling** — If the canonical path already exists and `force` is
+   `False`, `ErrTemplateExists` is returned and the existing file is not touched.
+
+6. **Atomic write** — `tomli_w.dump` writes to a sibling temp file created with
+   `tempfile.NamedTemporaryFile(dir=tdir, delete=False, suffix=".toml.tmp")`.
+   `os.replace` then atomically renames the temp file to the canonical path. On
+   serialization failure the temp file is removed via `os.unlink`.
+
+### Atomic-rename property
+
+A crash between the temp write and the `os.replace` rename leaves the canonical
+path either untouched (if it existed before) or absent (if it did not). The
+canonical file is never partially written. The temp file is cleaned up on any
+serialization failure via `os.unlink`.
+
+### Loader-shared path
+
+`write_template_impl` writes to the same on-disk path that the Epic 3 loader
+(`load_template`, `enumerate_templates`) reads from. A freshly written template
+is immediately visible to the next `spawn_worker(template=<name>)` call.
+SR-6.6's no-caching property means hand-edits made during a long-running MCP
+server session take effect on the next spawn without reload.
+
+### Single-impl note
+
+`write_template_impl` is the shared implementation that both the Epic 5 MCP
+tool and the Epic 6 CLI subcommand (forward reference) delegate to. The
+resulting `.toml` file is byte-identical regardless of which surface authored
+it.
+
 ## Errors
 
 | err_name | Condition |
