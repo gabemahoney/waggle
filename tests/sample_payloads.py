@@ -252,3 +252,51 @@ STDERR_ERR_STORE_UNAVAILABLE = (
 STDERR_ERR_PAYLOAD_MALFORMED = (
     "ERROR: ErrPayloadMalformed: instances.labels failed validation: invalid UTF-8\n"
 )
+
+# ---------------------------------------------------------------------------
+# TOML template bodies (SR-11.5) — canonical fixtures for template load tests.
+# No TOML body strings appear outside these five named constants.
+# ---------------------------------------------------------------------------
+
+# Smallest valid template — only the required cwd field.
+TEMPLATE_TOML_MINIMAL = 'cwd = "/tmp"\n'
+
+# Valid template exercising every SR-1.1 option except `template`.
+TEMPLATE_TOML_FULL = """\
+cwd = "/work/repo"
+model = "claude-opus-4-5"
+thinking = "high"
+tmux_session_name = "orch-main"
+instance_id = "test-instance-001"
+claude_home = "/custom/home"
+claude_settings = "/path/to/settings.json"
+claude_args = ["--dangerously-skip-permissions", "--verbose"]
+
+[extra_env]
+FOO = "bar"
+BAZ = "qux"
+
+[claude_status_labels]
+role = "orchestrator"
+project = "waggle"
+
+[permissions]
+allow = ["Bash", "Read"]
+deny = ["WebFetch"]
+ask = ["Write"]
+"""
+
+# Valid TOML syntax but contains a key not in the SR-1.1 schema.
+TEMPLATE_TOML_MALFORMED_UNKNOWN_KEY = """\
+cwd = "/tmp"
+not_a_real_option = "x"
+"""
+
+# Invalid TOML — unterminated string literal causes parse failure.
+TEMPLATE_TOML_MALFORMED_PARSE = 'cwd = "/tmp\n'
+
+# Valid TOML syntax but contains `template` key (forbidden per SR-2.4).
+TEMPLATE_TOML_RECURSIVE = """\
+cwd = "/tmp"
+template = "other"
+"""

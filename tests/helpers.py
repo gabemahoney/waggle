@@ -7,6 +7,8 @@ No imports from claude_spawn.* production source except via the patch target.
 from __future__ import annotations
 
 import contextlib
+import os
+import tempfile
 from collections.abc import Sequence
 from typing import Any
 from unittest.mock import patch
@@ -166,3 +168,35 @@ class _FakeTmuxPane:
 def fake_tmux_pane(text: str) -> _FakeTmuxPane:
     """Return a fake libtmux pane whose ``capture_pane()`` returns ``text`` as lines."""
     return _FakeTmuxPane(text)
+
+
+# ---------------------------------------------------------------------------
+# fake_templates_dir — patches claude_spawn.templates._templates_dir (SR-11.4)
+# ---------------------------------------------------------------------------
+
+_TEMPLATES_DIR_SEAM = "claude_spawn.templates._templates_dir"
+
+
+@contextlib.contextmanager
+def fake_templates_dir(mapping: dict[str, str]):
+    """Context manager that creates a temp dir populated with TOML template files.
+
+    Takes ``mapping`` of ``{template_name: toml_body_string}``.  For each
+    entry writes ``<temp_dir>/<template_name>.toml``.  Patches
+    ``claude_spawn.templates._templates_dir`` to return the temp dir path for
+    the duration of the context.  Yields the temp dir path.  On exit, restores
+    the patch and removes the temp directory.
+
+    Usage::
+
+        with fake_templates_dir({"orch": TEMPLATE_TOML_MINIMAL}) as tdir:
+            result = load_template("orch")
+            assert result["ok"] is True
+    """
+    with tempfile.TemporaryDirectory() as tdir:
+        for name, body in mapping.items():
+            dest = os.path.join(tdir, f"{name}.toml")
+            with open(dest, "w", encoding="utf-8") as fh:
+                fh.write(body)
+        with patch(_TEMPLATES_DIR_SEAM, return_value=tdir):
+            yield tdir
