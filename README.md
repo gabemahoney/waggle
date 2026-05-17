@@ -51,11 +51,53 @@ Spawn a new Claude Code worker in a tmux session.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `model` | `str` | Yes | — | Claude model (`"sonnet"`, `"haiku"`, `"opus"`) |
-| `repo` | `str` | Yes | — | Absolute local path to the repo |
-| `session_name` | `str` | No | auto | tmux session name; auto-generated as `spawn-{id[:8]}` if omitted |
+| `template` | `str` | No | None | Reserved for template loading (Epic 3); accepted but not loaded |
+| `model` | `str` | No | inherits Claude Code | Claude model name |
+| `thinking` | `str` | No | inherits Claude Code | Effort level — one of `low`, `medium`, `high`, `xhigh` |
+| `cwd` | `str` | **Yes** | — | Absolute local path (or `~/...`) to the working directory |
+| `tmux_session_name` | `str` | No | `<folder>-<instance_id[:8]>` | tmux session name |
+| `instance_id` | `str` | No | UUIDv4 | Worker identifier |
+| `claude_home` | `str` | No | inherits Claude Code | Override `HOME` for the spawned Claude process |
+| `claude_settings` | `str` | No | inherits Claude Code | Path to a Claude settings JSON file; must exist |
+| `extra_env` | `dict[str, str]` | No | `{}` | Additional environment variables for the session |
+| `claude_status_labels` | `dict[str, str]` | No | `{}` | Extra Claude Status labels (bare key, auto-uppercased and prefixed) |
+| `claude_args` | `list[str]` | No | `[]` | Arguments appended verbatim to the `claude` invocation |
+| `permissions` | `dict` | No | `{}` | `{"allow": [], "deny": [], "ask": []}` permissions overlay |
 
-Returns: `{"ok": true, "instance_id": str, "session_name": str}`
+**Per-option fallback category (SR-1.3):**
+
+| Category | Parameters |
+|----------|------------|
+| Required (no fallback) | `cwd` |
+| Hardcoded by Claude Spawn | `tmux_session_name`, `instance_id`, `extra_env`, `claude_status_labels`, `claude_args`, `permissions` |
+| Inherits Claude Code default | `model`, `thinking`, `claude_home`, `claude_settings` |
+
+Returns: `{"instance_id": str, "tmux_session_name": str}`
+
+#### `cwd` accepts local paths only
+
+`cwd` must be an absolute local filesystem path, or a `~`-prefixed path that expands via `os.path.expanduser`. The directory must already exist.
+
+- HTTPS and SSH URLs are rejected with `ErrCwdNotAPath`. Claude Spawn never clones from a remote URL — pre-clone the repository, then pass the absolute path.
+- Relative paths (e.g. `./myrepo`) are rejected with `ErrCwdNotAPath` so the resolved directory is never ambiguous about which process's working directory it is relative to.
+- A non-existent path is rejected with `ErrCwdNotFound`. Claude Spawn does not create the directory.
+
+#### Claude Code settings stack
+
+Claude Code merges settings from four layers, lowest to highest precedence:
+
+1. Enterprise managed settings (e.g. `/etc/claude-code/managed-settings.json`)
+2. User settings — `<HOME>/.claude/settings.json`
+3. Project shared settings — `<cwd>/.claude/settings.json`
+4. Project local settings — `<cwd>/.claude/settings.local.json`
+
+The CLI `--settings <path>` overlay wins above all four layers. Claude Spawn options map to this stack as follows:
+
+- `claude_home` — rewrites `HOME` for the worker process, redirecting layer 2 to a different config tree.
+- `claude_settings` — supplies the path passed via `--settings`, the highest-precedence overlay.
+- `permissions` — realized inside that overlay. When no `claude_settings` is supplied, Claude Spawn synthesizes a minimal overlay containing just the `permissions` block. When both `claude_settings` and `permissions` are supplied, Claude Spawn writes a composite temp file with first-class `permissions.allow`/`deny`/`ask` layered on top of the caller's file (those three keys win; other top-level keys pass through unchanged).
+
+Passing `--dangerously-skip-permissions` via `claude_args` alongside a non-empty `permissions` map is not an error; Claude Code's CLI-level bypass wins at runtime over the synthesized permissions overlay (SR-9.4).
 
 ---
 
